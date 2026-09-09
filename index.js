@@ -1073,3 +1073,14 @@ process.on('warning', (w) => console.warn('[WARNING]', w.message));
 
 /* ============================ LOGIN ============================ */
 client.login(config.token).catch((e) => { console.error('[LOGIN] Hata:', e.message); process.exit(1); });
+const express = require('express');
+const app = express();
+const port = process.env.PORT || 8080;
+
+app.get('/', (req, res) => {
+  res.send('Bot 7/24 aktif!');
+});
+
+app.listen(port, () => {
+  console.log(`Sunucu ${port} portunda başlatıldı.`);
+});
