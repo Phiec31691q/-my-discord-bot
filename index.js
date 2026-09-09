@@ -1,768 +1,3305 @@
-/* ============================================================
-   JARM v2 — FULL-SUITE DISCORD BOT | Discord.js v14
-   AI Chat + Kayıt + Kurulum + Guard + Level + Ticket + Mod
-   JXRM Studio • Developer: 217i • Verification Ready
-   ============================================================ */
-require('dotenv').config();
+require("dotenv").config();
+
 const {
-  Client, GatewayIntentBits, Partials, Collection, REST, Routes, ActivityType,
-  SlashCommandBuilder, PermissionFlagsBits, ChannelType, EmbedBuilder,
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder,
-  ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags, AttachmentBuilder, AuditLogEvent
-} = require('discord.js');
-const express = require('express');
-const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
+  Client,
+  GatewayIntentBits,
+  Partials,
+  Collection,
+  REST,
+  Routes,
+  ActivityType,
+  SlashCommandBuilder,
+  PermissionFlagsBits,
+  ChannelType,
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  StringSelectMenuBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  AttachmentBuilder,
+  AuditLogEvent,
+  MessageFlags
+} = require("discord.js");
 
-/* ============================ CONFIG ============================ */
-const config = {
-  token: process.env.TOKEN,
-  clientId: process.env.CLIENT_ID,
-  devGuild: process.env.DEV_GUILD_ID || null,
-  port: parseInt(process.env.PORT || '8080', 10),
-  owners: (process.env.OWNER_IDS || '').split(',').map(s => s.trim()).filter(Boolean),
-  colors: { primary: 0xF5C542, success: 0x57F287, error: 0xED4245, warn: 0xFEE75C, gold: 0xFFB830, purple: 0x9D5CFF, ai: 0x00E5FF, guard: 0xE74C3C }
+const express = require("express");
+const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto");
+
+/* ============================================================
+   CONFIG
+============================================================ */
+
+const CONFIG = {
+  token: process.env.TOKEN || "",
+  clientId: process.env.CLIENT_ID || "",
+  devGuildId: process.env.DEV_GUILD_ID || "",
+  port: Number(process.env.PORT || 8080),
+  owners: (process.env.OWNER_IDS || "")
+    .split(",")
+    .map(x => x.trim())
+    .filter(Boolean),
+  colors: {
+    main: 0xf5c542,
+    dark: 0x111827,
+    success: 0x57f287,
+    error: 0xed4245,
+    warning: 0xfee75c,
+    ai: 0x00e5ff,
+    guard: 0xe74c3c,
+    purple: 0x9d5cff,
+    pink: 0xff7eb9,
+    blue: 0x3498db,
+    green: 0x2ecc71
+  }
 };
 
-/* ============================ JSON-LITE DB ============================ */
-const DB_DIR = path.join(__dirname, 'data');
-const DB_FILE = path.join(DB_DIR, 'db.json');
-if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
-let dbCache = {};
-try { dbCache = JSON.parse(fs.readFileSync(DB_FILE, 'utf8')); } catch { dbCache = {}; }
-let dbTimer = null;
-function dbPersist() { if (dbTimer) return; dbTimer = setTimeout(() => { dbTimer = null; try { fs.writeFileSync(DB_FILE, JSON.stringify(dbCache, null, 2)); } catch (e) { console.error('[DB]', e.message); } }, 400); }
-function dbWalk(key, create) { const parts = key.split('.'); let node = dbCache; for (let i = 0; i < parts.length - 1; i++) { const p = parts[i]; if (node[p] == null || typeof node[p] !== 'object') { if (!create) return null; node[p] = {}; } node = node[p]; } return { node, last: parts[parts.length - 1] }; }
+if (!CONFIG.token) console.error("TOKEN .env içinde yok.");
+if (!CONFIG.clientId) console.error("CLIENT_ID .env içinde yok.");
+
+/* ============================================================
+   JSON DATABASE
+============================================================ */
+
+const DATA_DIR = path.join(__dirname, "data");
+const DB_FILE = path.join(DATA_DIR, "db.json");
+
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+
+let DB_CACHE = {};
+try {
+  DB_CACHE = JSON.parse(fs.readFileSync(DB_FILE, "utf8"));
+} catch {
+  DB_CACHE = {};
+}
+
+let dbWriteTimer = null;
+
+function saveDbSoon() {
+  if (dbWriteTimer) return;
+  dbWriteTimer = setTimeout(() => {
+    dbWriteTimer = null;
+    try {
+      fs.writeFileSync(DB_FILE, JSON.stringify(DB_CACHE, null, 2));
+    } catch (err) {
+      console.error("[DB WRITE ERROR]", err);
+    }
+  }, 300);
+}
+
 const db = {
-  get(k, d = null) { const w = dbWalk(k, false); if (!w) return d; const v = w.node[w.last]; return v === undefined ? d : v; },
-  set(k, v) { const w = dbWalk(k, true); w.node[w.last] = v; dbPersist(); return v; },
-  add(k, n) { return this.set(k, (Number(this.get(k, 0)) || 0) + n); },
-  push(k, v) { const a = this.get(k, []); if (!Array.isArray(a)) return this.set(k, [v]); a.push(v); return this.set(k, a); },
-  delete(k) { const w = dbWalk(k, false); if (!w) return false; delete w.node[w.last]; dbPersist(); return true; },
-  has(k) { return this.get(k, undefined) !== undefined; },
-  startsWith(prefix) { return Object.keys(dbCache).filter(k => k.startsWith(prefix)).map(k => [k, dbCache[k]]); }
+  get(key, def = null) {
+    return Object.prototype.hasOwnProperty.call(DB_CACHE, key) ? DB_CACHE[key] : def;
+  },
+  set(key, value) {
+    DB_CACHE[key] = value;
+    saveDbSoon();
+    return value;
+  },
+  delete(key) {
+    delete DB_CACHE[key];
+    saveDbSoon();
+  },
+  add(key, value) {
+    const current = Number(this.get(key, 0)) || 0;
+    return this.set(key, current + value);
+  },
+  push(key, value) {
+    const arr = this.get(key, []);
+    if (!Array.isArray(arr)) return this.set(key, [value]);
+    arr.push(value);
+    return this.set(key, arr);
+  },
+  startsWith(prefix) {
+    return Object.entries(DB_CACHE).filter(([k]) => k.startsWith(prefix));
+  }
 };
 
-/* ============================ EMBED / YARDIMCILAR ============================ */
-const base = (c = config.colors.primary) => new EmbedBuilder().setColor(c).setTimestamp();
-const ok = (t) => base(config.colors.success).setDescription(`✅ ${t}`);
-const err = (t) => base(config.colors.error).setDescription(`❌ ${t}`);
-const info = (t) => base(config.colors.primary).setDescription(t);
-function jEmbed(client, c = config.colors.primary) { return base(c).setFooter({ text: 'Jarm • JXRM Studio', iconURL: client.user.displayAvatarURL() }).setThumbnail(client.user.displayAvatarURL({ size: 256 })); }
-function hasPerms(i, p = []) { const m = i.member; if (!m) return false; if (m.permissions.has(PermissionFlagsBits.Administrator)) return true; return m.permissions.has(p); }
-async function deny(i, t) { const p = { content: `❌ ${t}`, flags: MessageFlags.Ephemeral }; if (i.replied || i.deferred) await i.followUp(p); else await i.reply(p); }
-function hierarchyOk(i, t) { const g = i.guild; if (t.id === g.ownerId) return false; if (i.user.id === g.ownerId) return true; if (i.member.roles.highest.position <= t.roles.highest.position) return false; if (g.members.me.roles.highest.position <= t.roles.highest.position) return false; return true; }
-function split2000(t) { const out = []; while (t.length > 2000) { let cut = t.lastIndexOf('\n', 2000); if (cut < 500) cut = t.lastIndexOf(' ', 2000); if (cut < 500) cut = 2000; out.push(t.slice(0, cut)); t = t.slice(cut).trim(); } if (t) out.push(t); return out; }
-function bar(cur, max, len = 10) { const p = Math.max(0, Math.min(1, cur / max)); const f = Math.round(p * len); return '▰'.repeat(f) + '▱'.repeat(len - f); }
-function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+/* ============================================================
+   CLIENT
+============================================================ */
 
-/* ============================ TRANSKRIPT ============================ */
-async function buildTranscript(channel, meta) {
-  const msgs = []; let lastId;
-  for (let i = 0; i < 3; i++) { const o = { limit: 100 }; if (lastId) o.before = lastId; const b = await channel.messages.fetch(o).catch(() => null); if (!b || !b.size) break; msgs.push(...b.values()); lastId = b.lastKey(); if (b.size < 100) break; }
-  msgs.reverse();
-  const rows = msgs.map(m => `<div class="m"><span class="t">[${new Date(m.createdTimestamp).toLocaleString('tr-TR')}]</span> <b>${esc(m.author.tag)}</b>: ${esc(m.content || '')}</div>`).join('\n');
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{background:#1e1f22;color:#dbdee1;font-family:sans-serif;padding:24px}.m{padding:5px;border-bottom:1px solid #2b2d31}.t{color:#949ba4;font-size:12px}b{color:#f5c542}</style></head><body><h1>Ticket: ${esc(channel.name)}</h1><h3>Kategori: ${esc(meta && meta.category || '-')} | Konu: ${esc(meta && meta.subject || '-')}</h3><hr>${rows}</body></html>`;
-  return new AttachmentBuilder(Buffer.from(html, 'utf8'), { name: `transcript-${channel.name}.html` });
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildModeration
+  ],
+  partials: [Partials.Channel, Partials.Message, Partials.User, Partials.GuildMember]
+});
+
+client.commands = new Collection();
+
+/* ============================================================
+   HELPERS
+============================================================ */
+
+function nowSec() {
+  return Math.floor(Date.now() / 1000);
 }
 
-/* ============================ SİCİL ============================ */
-function modlog(client, guild, o) { const id = db.get(`modlog_${guild.id}`, null); if (!id || !guild.channels.cache.has(id)) return; guild.channels.cache.get(id).send({ embeds: [base(config.colors.warn).setTitle('📒 Ceza Kaydı').addFields({ name: 'Tür', value: `\`${o.type}\``, inline: true }, { name: 'Kullanıcı', value: `<@${o.userId}>`, inline: true }, { name: 'Yetkili', value: `${o.mod}`, inline: true }, { name: 'Sebep', value: o.reason || 'Belirtilmedi', inline: false })] }).catch(() => {}); }
-function addRecord(client, guild, userId, type, mod, reason) { const seq = db.add(`sicilseq_${guild.id}`, 1); const rec = { id: `#${seq}`, type, reason: reason || 'Belirtilmedi', mod: mod.id, modTag: mod.tag || mod.username || 'Bot', date: Date.now() }; db.push(`sicil_${guild.id}_${userId}`, rec); modlog(client, guild, { type, userId, mod, reason }); return rec.id; }
-function getRecords(g, u) { return db.get(`sicil_${g.id}_${u}`, []) || []; }
+function cleanText(text, max = 1900) {
+  return String(text || "")
+    .replace(/@everyone/g, "@\u200beveryone")
+    .replace(/@here/g, "@\u200bhere")
+    .slice(0, max);
+}
 
-/* ============================ AI CHAT ENGINE (GROQ / OPENAI) ============================ */
+function baseEmbed(color = CONFIG.colors.main) {
+  return new EmbedBuilder().setColor(color).setTimestamp();
+}
+
+function jarmEmbed(color = CONFIG.colors.main) {
+  const emb = baseEmbed(color);
+  if (client.user) {
+    emb.setFooter({
+      text: "Jarm • JXRM Studio • Developer: 217i",
+      iconURL: client.user.displayAvatarURL()
+    });
+    emb.setThumbnail(client.user.displayAvatarURL({ size: 256 }));
+  }
+  return emb;
+}
+
+function okEmbed(text) {
+  return baseEmbed(CONFIG.colors.success).setDescription(`✅ ${text}`);
+}
+
+function errEmbed(text) {
+  return baseEmbed(CONFIG.colors.error).setDescription(`❌ ${text}`);
+}
+
+function infoEmbed(text) {
+  return baseEmbed(CONFIG.colors.main).setDescription(text);
+}
+
+function hasPerm(interaction, perms) {
+  if (!interaction.member) return false;
+  if (interaction.member.permissions.has(PermissionFlagsBits.Administrator)) return true;
+  return interaction.member.permissions.has(perms);
+}
+
+async function deny(interaction, text) {
+  const payload = {
+    embeds: [errEmbed(text)],
+    flags: MessageFlags.Ephemeral
+  };
+  if (interaction.replied || interaction.deferred) return interaction.followUp(payload).catch(() => {});
+  return interaction.reply(payload).catch(() => {});
+}
+
+function hierarchyOk(interaction, targetMember) {
+  const guild = interaction.guild;
+  if (!guild || !targetMember) return false;
+  if (targetMember.id === guild.ownerId) return false;
+  if (interaction.user.id === guild.ownerId) return true;
+  if (!guild.members.me) return false;
+
+  const executorPos = interaction.member.roles.highest.position;
+  const targetPos = targetMember.roles.highest.position;
+  const botPos = guild.members.me.roles.highest.position;
+
+  if (executorPos <= targetPos) return false;
+  if (botPos <= targetPos) return false;
+  return true;
+}
+
+function progressBar(current, max, size = 12) {
+  const percent = max <= 0 ? 0 : Math.max(0, Math.min(1, current / max));
+  const filled = Math.round(percent * size);
+  return "▰".repeat(filled) + "▱".repeat(size - filled);
+}
+
+function randomInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+/* ============================================================
+   TRANSCRIPT
+============================================================ */
+
+function htmlEscape(str) {
+  return String(str || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+async function createTranscript(channel, meta = {}) {
+  const messages = [];
+  let before;
+
+  for (let i = 0; i < 5; i++) {
+    const options = { limit: 100 };
+    if (before) options.before = before;
+
+    const batch = await channel.messages.fetch(options).catch(() => null);
+    if (!batch || !batch.size) break;
+
+    messages.push(...batch.values());
+    before = batch.lastKey();
+
+    if (batch.size < 100) break;
+  }
+
+  messages.reverse();
+
+  const rows = messages.map(msg => {
+    const content = msg.content ? htmlEscape(msg.content) : "";
+    const attachments = msg.attachments.size
+      ? `<br><i>Ekler: ${msg.attachments.map(a => `<a href="${a.url}">${htmlEscape(a.name || a.url)}</a>`).join(", ")}</i>`
+      : "";
+
+    return `
+      <div class="msg">
+        <img class="avatar" src="${msg.author.displayAvatarURL({ extension: "png" })}">
+        <div>
+          <div><b>${htmlEscape(msg.author.tag)}</b> <span>${new Date(msg.createdTimestamp).toLocaleString("tr-TR")}</span></div>
+          <div>${content || "<i>Mesaj içeriği yok.</i>"}${attachments}</div>
+        </div>
+      </div>
+    `;
+  }).join("\n");
+
+  const html = `<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Jarm Ticket Transcript</title>
+<style>
+body{background:#111827;color:#e5e7eb;font-family:Arial,Helvetica,sans-serif;padding:24px}
+h1{color:#f5c542}
+.card{background:#1f2937;border:1px solid #374151;border-radius:14px;padding:18px;margin-bottom:16px}
+.msg{display:flex;gap:12px;border-bottom:1px solid #374151;padding:10px 0}
+.avatar{width:42px;height:42px;border-radius:50%}
+span{color:#9ca3af;font-size:12px}
+a{color:#00e5ff}
+</style>
+</head>
+<body>
+<div class="card">
+<h1>🎫 Jarm Ticket Transkripti</h1>
+<p><b>Kanal:</b> #${htmlEscape(channel.name)}</p>
+<p><b>Sahip:</b> ${htmlEscape(meta.owner || "-")}</p>
+<p><b>Kategori:</b> ${htmlEscape(meta.category || "-")}</p>
+<p><b>Konu:</b> ${htmlEscape(meta.subject || "-")}</p>
+<p><b>Tarih:</b> ${new Date().toLocaleString("tr-TR")}</p>
+</div>
+<div class="card">${rows || "<p>Mesaj bulunamadı.</p>"}</div>
+</body>
+</html>`;
+
+  return new AttachmentBuilder(Buffer.from(html, "utf8"), {
+    name: `transcript-${channel.name}-${Date.now()}.html`
+  });
+}
+
+/* ============================================================
+   MOD RECORDS
+============================================================ */
+
+function getRecords(guildId, userId) {
+  return db.get(`records_${guildId}_${userId}`, []);
+}
+
+async function sendModLog(guild, embed) {
+  const logId = db.get(`modlog_${guild.id}`, null);
+  if (!logId) return;
+  const ch = guild.channels.cache.get(logId);
+  if (!ch) return;
+  await ch.send({ embeds: [embed] }).catch(() => {});
+}
+
+function addRecord(guild, userId, type, moderator, reason) {
+  const id = db.add(`recordseq_${guild.id}`, 1);
+  const record = {
+    id,
+    type,
+    reason: reason || "Belirtilmedi",
+    moderatorId: moderator.id,
+    moderatorTag: moderator.tag || moderator.username || "Jarm",
+    date: Date.now()
+  };
+
+  db.push(`records_${guild.id}_${userId}`, record);
+
+  sendModLog(
+    guild,
+    baseEmbed(CONFIG.colors.warning)
+      .setTitle("📒 Ceza Kaydı")
+      .addFields(
+        { name: "Kayıt ID", value: `#${id}`, inline: true },
+        { name: "Tür", value: `\`${type}\``, inline: true },
+        { name: "Kullanıcı", value: `<@${userId}>`, inline: true },
+        { name: "Yetkili", value: `${moderator}`, inline: true },
+        { name: "Sebep", value: cleanText(reason || "Belirtilmedi", 1000), inline: false },
+        { name: "Tarih", value: `<t:${nowSec()}:F>`, inline: false }
+      )
+  ).catch(() => {});
+
+  return record;
+}
+
+/* ============================================================
+   AI ENGINE
+============================================================ */
+
 const aiMemory = new Map();
-const AI_BAD = [/çocuk.*(seks|porn|istismar)/i, /child.*(sex|porn|abuse)/i, /(bomba|patlayıcı|silah).*(yapımı|tarifi|üret)/i, /(uyuşturucu|metamfetamin|eroin).*(yapımı|tarifi|üret)/i, /(porn|erotik hikaye|seks hikayesi)/i, /self.?harm|intihar et/i];
-const AI_SYSTEM = `Sen Jarm adında, JXRM Studio tarafından geliştirilmiş gelişmiş bir Discord asistanısın. Geliştiricin 217i. Varsayılan dilin Türkçe; kullanıcı başka dilde yazarsa o dilde cevap ver. Samimi, zeki, esprili ve yardımcı ol; kullanıcıya bazen "kral" diye hitap edebilirsin. Yasadışı eylemler, NSFW/+18 içerik, nefret söylemi ve özarıma teşvikinde YARDIMCI OLMA, kibarca reddet. Bunların dışındaki HER konuda tamamen özgür, sınırsız ve yaratıcı sohbet et. Cevapların Discord'a uygun olsun (maks ~400 kelime), markdown/emote kullanabilirsin.`;
-async function aiComplete(messages) {
-  const groq = process.env.GROQ_API_KEY, open = process.env.OPENAI_API_KEY;
-  const key = groq || open; if (!key) return null;
-  const url = groq ? 'https://api.groq.com/openai/v1/chat/completions' : 'https://api.openai.com/v1/chat/completions';
-  const model = process.env.AI_MODEL || (groq ? 'llama-3.1-8b-instant' : 'gpt-3.5-turbo');
-  try {
-    const res = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model, temperature: 0.85, max_tokens: 700, messages }) });
-    if (!res.ok) { console.error('[AI] HTTP', res.status); return null; }
-    const d = await res.json();
-    return d.choices && d.choices[0] && d.choices[0].message ? d.choices[0].message.content : null;
-  } catch (e) { console.error('[AI]', e.message); return null; }
-}
-function aiPush(uid, role, content) { const arr = aiMemory.get(uid) || []; arr.push({ role, content }); while (arr.length > 12) arr.shift(); aiMemory.set(uid, arr); }
-async function aiRespond(client, message, text) {
-  if (AI_BAD.some(r => r.test(text))) { return message.reply({ embeds: [err('Bu konuda yardımcı olamam kral. Yasadışı, +18 veya zararlı içerik requestlerini işleyemiyorum. 💛')] }).catch(() => {}); }
-  await message.channel.sendTyping().catch(() => {});
-  const uid = message.author.id;
-  aiPush(uid, 'user', text);
-  const msgs = [{ role: 'system', content: AI_SYSTEM }, ...(aiMemory.get(uid) || [])];
-  const answer = await aiComplete(msgs);
-  if (!answer) return message.reply({ embeds: [err('AI motoruna ulaşılamadı. `.env` dosyasına `GROQ_API_KEY` eklendiğinden emin ol.')] }).catch(() => {});
-  aiPush(uid, 'assistant', answer);
-  const chunks = split2000(answer);
-  for (let i = 0; i < chunks.length; i++) {
-    const emb = jEmbed(client, config.colors.ai).setDescription(chunks[i]);
-    if (i === 0) emb.setAuthor({ name: `Jarm AI • ${message.author.username} için`, iconURL: message.author.displayAvatarURL() });
-    await message.channel.send({ embeds: [emb] }).catch(() => {});
-  }
-}
 
-/* ============================ LEVEL SİSTEMİ ============================ */
-const xpCooldown = new Map();
-function xpData(g, u) { return db.get(`xp_${g}_${u}`, null) || { xp: 0, level: 0, msgs: 0 }; }
-function levelFor(xp) { return Math.floor(0.12 * Math.sqrt(xp)); }
-function xpForLevel(l) { return Math.pow(l / 0.12, 2); }
-async function giveXp(client, message) {
-  const key = `${message.guild.id}_${message.author.id}`;
-  const now = Date.now();
-  if ((xpCooldown.get(key) || 0) + 60000 > now) return;
-  xpCooldown.set(key, now);
-  const d = xpData(message.guild.id, message.author.id);
-  const gain = 15 + Math.floor(Math.random() * 11);
-  d.xp += gain; d.msgs++;
-  const oldLvl = d.level; const newLvl = levelFor(d.xp); d.level = newLvl;
-  db.set(`xp_${message.guild.id}_${message.author.id}`, d);
-  if (newLvl > oldLvl) {
-    const roles = db.get(`levelroles_${message.guild.id}`, null) || {};
-    const rid = roles[String(newLvl)];
-    if (rid && message.guild.roles.cache.has(rid)) await message.member.roles.add(rid, 'Seviye ödülü').catch(() => {});
-    await message.channel.send({ embeds: [jEmbed(client, config.colors.gold).setTitle('🎉 SEVİYE ATLADIN!').setDescription(`${message.member}, **${newLvl}. seviyeye** ulaştın! Tebrikler kral. 🏆`)] }).catch(() => {});
-  }
-}
+const AI_SYSTEM_PROMPT = `
+Sen Jarm adlı gelişmiş bir Discord yapay zeka asistanısın.
+Geliştiricin 217i, stüdyon JXRM Studio.
+Türkçe konuş, kullanıcı başka dil kullanırsa o dilde cevap ver.
+Samimi, akıllı, doğal, akıcı, eğlenceli ve yardımcı ol.
+Kullanıcıya bazen "kral" diye hitap edebilirsin.
+Yasadışı eylemler, +18/NSFW içerik, zararlı talimatlar, nefret söylemi ve öz zarar konularında yardımcı olma; kısa ve kibar reddet.
+Bunların dışında yaratıcı, özgür ve detaylı cevap ver.
+Discord mesaj formatına uygun cevap ver.
+`;
 
-/* ============================ GUARD (KORUMA) ============================ */
-const nukeTracker = new Map();
-const joinTracker = new Map();
-const snipes = new Map();
-function guardCfg(g) { return db.get(`guard_${g.id}`, null) || { enabled: { nuke: true, raid: true, role: true }, whitelist: [], log: null }; }
-function guardAllowed(guild, executorId) {
-  if (executorId === guild.ownerId || executorId === guild.members.me.id) return true;
-  const cfg = guardCfg(guild);
-  if (cfg.whitelist.includes(executorId)) return true;
-  const m = guild.members.cache.get(executorId);
-  if (!m) return false;
-  if (m.permissions.has(PermissionFlagsBits.Administrator)) return true;
-  return m.roles.cache.some(r => cfg.whitelist.includes(r.id));
-}
-async function guardPunish(client, guild, executorId, action) {
-  const cfg = guardCfg(guild);
-  const member = guild.members.cache.get(executorId);
-  if (member && member.moderatable) { await member.roles.set([], 'GUARD: Yetkisiz işlem').catch(() => {}); await member.ban({ reason: `GUARD: ${action}` }).catch(() => {}); }
-  if (cfg.log && guild.channels.cache.has(cfg.log)) {
-    guild.channels.cache.get(cfg.log).send({ embeds: [base(config.colors.guard).setTitle('🚨 GUARD MÜDAHALESİ').setDescription(`**<@${executorId}>** yetkisiz \`${action}\` işlemi denedi.\n➜ Rolleri alındı ve banlandı.`)] }).catch(() => {});
-  }
-}
-async function guardCount(client, guild, executorId, action) {
-  const key = `${guild.id}_${executorId}`;
-  const arr = (nukeTracker.get(key) || []).filter(t => Date.now() - t < 10000);
-  arr.push(Date.now()); nukeTracker.set(key, arr);
-  if (arr.length >= 3) { nukeTracker.set(key, []); await guardPunish(client, guild, executorId, action); }
-  else if (cfg_log(guild)) notifyGuard(guild, executorId, action, arr.length);
-}
-function cfg_log(g) { const c = guardCfg(g); return c.log && g.channels.cache.has(c.log) ? g.channels.cache.get(c.log) : null; }
-function notifyGuard(guild, executorId, action, count) { const ch = cfg_log(guild); if (!ch) return; ch.send({ embeds: [base(config.colors.guard).setTitle('⚠️ Guard Uyarısı').setDescription(`<@${executorId}> → \`${action}\` (10sn içinde ${count}/3)`)] }).catch(() => {}); }
-
-/* ============================ TICKET HELPERS ============================ */
-const CATEGORIES = [
-  { value: 'Destek', label: 'Destek', desc: 'Genel destek talepleri', color: config.colors.primary },
-  { value: 'Sikayet', label: 'Şikayet', desc: 'Oyuncu/üye şikayetleri', color: config.colors.error },
-  { value: 'VIP', label: 'VIP / Satış', desc: 'Satın alım & VIP', color: config.colors.gold },
-  { value: 'Basvuru', label: 'Yetkili Başvurusu', desc: 'Staff başvuruları', color: config.colors.success }
+const blockedAiPatterns = [
+  /çocuk.*(seks|porno|porn|istismar)/i,
+  /(bomba|patlayıcı|silah).*(yap|üret|tarif|nasıl)/i,
+  /(uyuşturucu|metamfetamin|eroin).*(yap|üret|tarif|nasıl)/i,
+  /(intihar|kendimi öldür|self.?harm)/i,
+  /(porno|pornografi|erotik hikaye|seks hikayesi)/i
 ];
-const catOf = v => CATEGORIES.find(c => c.value === v) || CATEGORIES[0];
-async function openTicketModal(i, cat) {
-  const c = catOf(cat);
-  const m = new ModalBuilder().setCustomId(`ticket_modal:${c.value}`).setTitle(`Ticket • ${c.label}`);
-  m.addComponents(
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('t_subject').setLabel('Konu').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80)),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('t_detail').setLabel('Detay').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000)));
-  await i.showModal(m);
-}
-async function createTicket(client, i) {
-  const cat = i.customId.split(':')[1] || 'Destek';
-  const subject = i.fields.getTextInputValue('t_subject'), detail = i.fields.getTextInputValue('t_detail');
-  const g = i.guild;
-  const ex = db.get(`ticket_open_${g.id}_${i.user.id}`, null);
-  if (ex && g.channels.cache.has(ex)) return i.reply({ embeds: [err(`Zaten açık ticketin var: <#${ex}>`)], flags: MessageFlags.Ephemeral });
-  const staff = db.get(`ticket_staff_${g.id}`, null);
-  const safe = i.user.username.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 20) || 'kullanici';
-  const ow = [
-    { id: g.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
-    { id: i.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles] },
-    { id: g.members.me.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels] }];
-  if (staff && g.roles.cache.has(staff)) ow.push({ id: staff, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
-  const ch = await g.channels.create({ name: `ticket-${safe}`, type: ChannelType.GuildText, topic: `Ticket | Sahip: ${i.user.id} | Kategori: ${cat}`, permissionOverwrites: ow });
-  db.set(`ticket_${ch.id}`, { owner: i.user.id, category: cat, subject, detail, openedAt: Date.now(), added: [], locked: false });
-  db.set(`ticket_open_${g.id}_${i.user.id}`, ch.id);
-  const c = catOf(cat);
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('t_close').setLabel('Kapat').setStyle(ButtonStyle.Danger),
-    new ButtonBuilder().setCustomId('t_lock').setLabel('Kilitle').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('t_transcript').setLabel('Transkript').setStyle(ButtonStyle.Secondary));
-  await ch.send({ content: `${i.user}${staff ? ` <@&${staff}>` : ''}`, embeds: [jEmbed(client, c.color).setTitle(`🎫 ${c.label} Ticket`).setDescription(`**Konu:** ${subject}\n**Detay:** ${detail}`)], components: [row] });
-  await i.reply({ embeds: [ok(`Ticket oluşturuldu: ${ch}`)], flags: MessageFlags.Ephemeral });
-}
-async function askClose(i) {
-  await i.reply({ embeds: [info('Ticketi kapatmak istediğine emin misin? Transkript loga gider.')], components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('t_close_yes').setLabel('Evet, Kapat').setStyle(ButtonStyle.Danger), new ButtonBuilder().setCustomId('t_close_no').setLabel('Vazgeç').setStyle(ButtonStyle.Secondary))], flags: MessageFlags.Ephemeral });
-}
-async function closeTicket(i, yes) {
-  if (!yes) return i.update({ embeds: [info('Kapatma iptal.')], components: [], flags: MessageFlags.Ephemeral });
-  const ch = i.channel, meta = db.get(`ticket_${ch.id}`, null);
-  const logId = db.get(`ticket_log_${ch.guild.id}`, null);
-  const log = logId ? ch.guild.channels.cache.get(logId) : null;
-  if (log) { const att = await buildTranscript(ch, meta); await log.send({ embeds: [base(config.colors.error).setTitle('🔒 Ticket Kapatıldı').addFields({ name: 'Sahip', value: meta ? `<@${meta.owner}>` : '-', inline: true }, { name: 'Kapatan', value: `${i.user}`, inline: true })], files: [att] }).catch(() => {}); }
-  if (meta) db.delete(`ticket_open_${ch.guild.id}_${meta.owner}`);
-  db.delete(`ticket_${ch.id}`);
-  await i.update({ embeds: [ok('Ticket kapatılıyor...')], components: [] });
-  setTimeout(() => ch.delete().catch(() => {}), 4000);
-}
-async function setLock(i, lock) {
-  const ch = i.channel, meta = db.get(`ticket_${ch.id}`, null);
-  if (!meta) return deny(i, 'Bu bir ticket kanalı değil.');
-  for (const uid of [meta.owner, ...(meta.added || [])]) await ch.permissionOverwrites.edit(uid, { SendMessages: lock ? false : null }).catch(() => {});
-  meta.locked = lock; db.set(`ticket_${ch.id}`, meta);
-  await i.update({ components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('t_close').setLabel('Kapat').setStyle(ButtonStyle.Danger), new ButtonBuilder().setCustomId(lock ? 't_unlock' : 't_lock').setLabel(lock ? 'Kilidi Aç' : 'Kilitle').setStyle(ButtonStyle.Secondary), new ButtonBuilder().setCustomId('t_transcript').setLabel('Transkript').setStyle(ButtonStyle.Secondary))] });
-  await i.followUp({ embeds: [ok(lock ? 'Ticket kilitlendi.' : 'Kilit açıldı.')], flags: MessageFlags.Ephemeral });
-}
-async function handleTranscript(i) {
-  const ch = i.channel, meta = db.get(`ticket_${ch.id}`, null);
-  const log = db.get(`ticket_log_${ch.guild.id}`, null);
-  if (!log || !ch.guild.channels.cache.has(log)) return deny(i, 'Log kanalı yok.');
-  await i.deferReply({ flags: MessageFlags.Ephemeral });
-  const att = await buildTranscript(ch, meta);
-  await ch.guild.channels.cache.get(log).send({ content: `📄 ${ch.name} — ${i.user}`, files: [att] });
-  await i.editReply({ embeds: [ok('Transkript gönderildi.')] });
+
+function addAiMemory(userId, role, content) {
+  const arr = aiMemory.get(userId) || [];
+  arr.push({ role, content: String(content).slice(0, 2500) });
+  while (arr.length > 12) arr.shift();
+  aiMemory.set(userId, arr);
 }
 
-/* ============================ KAYIT SİSTEMİ ============================ */
-async function applyRegistration(client, guild, member, data, gender, staff) {
-  const cfg = db.get(`kayit_${guild.id}`, null);
-  if (!cfg) throw new Error('Kayıt sistemi kurulu değil (/kayıt-sistem).');
-  const tag = cfg.tag || '';
-  const nick = `${tag} ${data.name} | ${data.age}`.slice(0, 32);
-  await member.setNickname(nick, 'Kayıt sistemi').catch(() => {});
-  const remove = [cfg.kayitsiz].filter(Boolean);
-  const add = [gender === 'm' ? cfg.erkek : cfg.kadin, cfg.uye].filter(Boolean);
-  for (const r of remove) if (guild.roles.cache.has(r)) await member.roles.remove(r, 'Kayıt').catch(() => {});
-  for (const r of add) if (guild.roles.cache.has(r)) await member.roles.add(r, 'Kayıt').catch(() => {});
-  const stats = db.get(`kayitstats_${guild.id}`, null) || { total: 0, m: 0, f: 0 };
-  stats.total++; gender === 'm' ? stats.m++ : stats.f++;
-  db.set(`kayitstats_${guild.id}`, stats);
-  db.delete(`regpending_${guild.id}_${member.id}`);
-  const logCh = cfg.log && guild.channels.cache.has(cfg.log) ? guild.channels.cache.get(cfg.log) : null;
-  if (logCh) logCh.send({ embeds: [jEmbed(client, config.colors.success).setTitle('📝 KAYIT TAMAMLANDI').setDescription(`${member} başarıyla kaydedildi.`).addFields({ name: 'İsim', value: `\`${nick}\``, inline: true }, { name: 'Cinsiyet', value: gender === 'm' ? '♂ Erkek' : '♀ Kadın', inline: true }, { name: 'Yetkili', value: staff ? `${staff}` : 'Kendisi (Form)', inline: true })] }).catch(() => {});
+async function callAi(messages) {
+  const groqKey = process.env.GROQ_API_KEY;
+  const openAiKey = process.env.OPENAI_API_KEY;
+
+  if (!groqKey && !openAiKey) return null;
+
+  const usingGroq = Boolean(groqKey);
+  const url = usingGroq
+    ? "https://api.groq.com/openai/v1/chat/completions"
+    : "https://api.openai.com/v1/chat/completions";
+
+  const key = usingGroq ? groqKey : openAiKey;
+  const model = process.env.AI_MODEL || (usingGroq ? "llama-3.1-8b-instant" : "gpt-3.5-turbo");
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.85,
+      max_tokens: 750,
+      messages
+    })
+  }).catch(err => {
+    console.error("[AI FETCH ERROR]", err);
+    return null;
+  });
+
+  if (!res || !res.ok) {
+    if (res) console.error("[AI HTTP ERROR]", res.status, await res.text().catch(() => ""));
+    return null;
+  }
+
+  const json = await res.json().catch(() => null);
+  return json?.choices?.[0]?.message?.content || null;
+}
+
+async function answerAiMessage(message, question) {
+  if (!question.trim()) return;
+
+  if (blockedAiPatterns.some(r => r.test(question))) {
+    return message.reply({
+      embeds: [errEmbed("Bu konuda yardımcı olamam kral. Zararlı, yasadışı veya +18 içeriklere destek veremem.")]
+    }).catch(() => {});
+  }
+
+  await message.channel.sendTyping().catch(() => {});
+
+  addAiMemory(message.author.id, "user", question);
+
+  const messages = [
+    { role: "system", content: AI_SYSTEM_PROMPT },
+    ...(aiMemory.get(message.author.id) || [])
+  ];
+
+  const answer = await callAi(messages);
+
+  if (!answer) {
+    return message.reply({
+      embeds: [errEmbed("AI motoruna ulaşılamadı. Render Environment kısmına `GROQ_API_KEY` eklediğinden emin ol.")]
+    }).catch(() => {});
+  }
+
+  addAiMemory(message.author.id, "assistant", answer);
+
+  const chunks = [];
+  let text = answer;
+  while (text.length > 1900) {
+    let cut = text.lastIndexOf("\n", 1900);
+    if (cut < 500) cut = text.lastIndexOf(" ", 1900);
+    if (cut < 500) cut = 1900;
+    chunks.push(text.slice(0, cut));
+    text = text.slice(cut).trim();
+  }
+  if (text) chunks.push(text);
+
+  for (const chunk of chunks) {
+    await message.reply({
+      embeds: [
+        jarmEmbed(CONFIG.colors.ai)
+          .setAuthor({
+            name: `Jarm AI • ${message.author.username}`,
+            iconURL: message.author.displayAvatarURL()
+          })
+          .setDescription(cleanText(chunk, 4000))
+      ]
+    }).catch(() => {});
+  }
+}
+
+/* ============================================================
+   LEVEL SYSTEM
+============================================================ */
+
+const xpCooldown = new Map();
+
+function getXp(guildId, userId) {
+  return db.get(`xp_${guildId}_${userId}`, {
+    xp: 0,
+    level: 0,
+    messages: 0
+  });
+}
+
+function levelFromXp(xp) {
+  return Math.floor(0.12 * Math.sqrt(xp));
+}
+
+function xpForLevel(level) {
+  return Math.ceil(Math.pow(level / 0.12, 2));
+}
+
+async function giveXp(message) {
+  const key = `${message.guild.id}_${message.author.id}`;
+  const last = xpCooldown.get(key) || 0;
+  if (Date.now() - last < 60000) return;
+
+  xpCooldown.set(key, Date.now());
+
+  const data = getXp(message.guild.id, message.author.id);
+  const oldLevel = data.level;
+
+  data.xp += randomInt(15, 25);
+  data.messages += 1;
+  data.level = levelFromXp(data.xp);
+
+  db.set(`xp_${message.guild.id}_${message.author.id}`, data);
+
+  if (data.level > oldLevel) {
+    const levelRoles = db.get(`levelroles_${message.guild.id}`, {});
+    const roleId = levelRoles[String(data.level)];
+
+    if (roleId && message.guild.roles.cache.has(roleId)) {
+      await message.member.roles.add(roleId, "Jarm seviye ödülü").catch(() => {});
+    }
+
+    await message.channel.send({
+      embeds: [
+        jarmEmbed(CONFIG.colors.gold)
+          .setTitle("🎉 Seviye Atladın!")
+          .setDescription(`${message.member}, **${data.level}. seviyeye** ulaştın kral!`)
+      ]
+    }).catch(() => {});
+  }
+}
+
+/* ============================================================
+   TICKET SYSTEM
+============================================================ */
+
+const TICKET_CATEGORIES = [
+  { label: "Destek", value: "destek", desc: "Genel destek ve yardım", color: CONFIG.colors.main },
+  { label: "Şikayet", value: "sikayet", desc: "Üye / olay şikayetleri", color: CONFIG.colors.error },
+  { label: "VIP / Satış", value: "vip", desc: "Satış, ödeme ve VIP işlemleri", color: CONFIG.colors.gold },
+  { label: "Yetkili Başvurusu", value: "basvuru", desc: "Ekip başvurusu", color: CONFIG.colors.green }
+];
+
+function ticketCategory(value) {
+  return TICKET_CATEGORIES.find(x => x.value === value) || TICKET_CATEGORIES[0];
+}
+
+async function showTicketModal(interaction, categoryValue) {
+  const cat = ticketCategory(categoryValue);
+
+  const modal = new ModalBuilder()
+    .setCustomId(`ticket_modal:${cat.value}`)
+    .setTitle(`Jarm Ticket • ${cat.label}`);
+
+  const subject = new TextInputBuilder()
+    .setCustomId("subject")
+    .setLabel("Konu")
+    .setStyle(TextInputStyle.Short)
+    .setMaxLength(80)
+    .setRequired(true)
+    .setPlaceholder("Sorununun kısa başlığı");
+
+  const detail = new TextInputBuilder()
+    .setCustomId("detail")
+    .setLabel("Detay")
+    .setStyle(TextInputStyle.Paragraph)
+    .setMaxLength(1000)
+    .setRequired(true)
+    .setPlaceholder("Sorununu detaylı şekilde anlat");
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(subject),
+    new ActionRowBuilder().addComponents(detail)
+  );
+
+  await interaction.showModal(modal);
+}
+
+async function createTicket(interaction) {
+  const guild = interaction.guild;
+  const categoryValue = interaction.customId.split(":")[1] || "destek";
+  const cat = ticketCategory(categoryValue);
+
+  const subject = interaction.fields.getTextInputValue("subject");
+  const detail = interaction.fields.getTextInputValue("detail");
+
+  const existing = db.get(`open_ticket_${guild.id}_${interaction.user.id}`, null);
+  if (existing && guild.channels.cache.has(existing)) {
+    return interaction.reply({
+      embeds: [errEmbed(`Zaten açık ticketin var: <#${existing}>`)],
+      flags: MessageFlags.Ephemeral
+    });
+  }
+
+  const staffRoleId = db.get(`ticket_staff_${guild.id}`, null);
+
+  const safeName = interaction.user.username
+    .toLowerCase()
+    .replace(/[^a-z0-9ğüşöçıİĞÜŞÖÇ-]+/gi, "-")
+    .slice(0, 20);
+
+  const overwrites = [
+    {
+      id: guild.roles.everyone.id,
+      deny: [PermissionFlagsBits.ViewChannel]
+    },
+    {
+      id: interaction.user.id,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ReadMessageHistory,
+        PermissionFlagsBits.AttachFiles
+      ]
+    },
+    {
+      id: guild.members.me.id,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ManageChannels,
+        PermissionFlagsBits.ReadMessageHistory
+      ]
+    }
+  ];
+
+  if (staffRoleId && guild.roles.cache.has(staffRoleId)) {
+    overwrites.push({
+      id: staffRoleId,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ReadMessageHistory
+      ]
+    });
+  }
+
+  const channel = await guild.channels.create({
+    name: `ticket-${safeName || "user"}`,
+    type: ChannelType.GuildText,
+    topic: `Jarm Ticket | Owner: ${interaction.user.id} | Category: ${cat.value}`,
+    permissionOverwrites: overwrites,
+    reason: "Jarm ticket oluşturuldu"
+  });
+
+  const meta = {
+    ownerId: interaction.user.id,
+    owner: interaction.user.tag,
+    category: cat.label,
+    subject,
+    detail,
+    openedAt: Date.now(),
+    added: [],
+    locked: false
+  };
+
+  db.set(`ticket_${channel.id}`, meta);
+  db.set(`open_ticket_${guild.id}_${interaction.user.id}`, channel.id);
+
+  const buttons = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId("ticket_close").setLabel("Kapat").setEmoji("🔒").setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId("ticket_lock").setLabel("Kilitle").setEmoji("🔐").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("ticket_transcript").setLabel("Transkript").setEmoji("📄").setStyle(ButtonStyle.Primary)
+  );
+
+  await channel.send({
+    content: `${interaction.user}${staffRoleId ? ` <@&${staffRoleId}>` : ""}`,
+    embeds: [
+      jarmEmbed(cat.color)
+        .setTitle(`🎫 ${cat.label} Ticket`)
+        .setDescription(
+          `**Konu:** ${cleanText(subject, 200)}\n` +
+          `**Detay:** ${cleanText(detail, 1000)}\n\n` +
+          `Yetkililer en kısa sürede ilgilenecek.`
+        )
+        .addFields(
+          { name: "Açan", value: `${interaction.user}`, inline: true },
+          { name: "Kategori", value: cat.label, inline: true },
+          { name: "Açılış", value: `<t:${nowSec()}:F>`, inline: true }
+        )
+    ],
+    components: [buttons]
+  });
+
+  await interaction.reply({
+    embeds: [okEmbed(`Ticket oluşturuldu: ${channel}`)],
+    flags: MessageFlags.Ephemeral
+  });
+}
+
+async function askCloseTicket(interaction) {
+  await interaction.reply({
+    embeds: [infoEmbed("Bu ticket kapatılsın mı? Kapatılırken HTML transkript log kanalına gönderilir.")],
+    components: [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId("ticket_close_yes").setLabel("Evet, Kapat").setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId("ticket_close_no").setLabel("Vazgeç").setStyle(ButtonStyle.Secondary)
+      )
+    ],
+    flags: MessageFlags.Ephemeral
+  });
+}
+
+async function closeTicket(interaction, yes) {
+  if (!yes) {
+    return interaction.update({
+      embeds: [infoEmbed("Ticket kapatma işlemi iptal edildi.")],
+      components: []
+    });
+  }
+
+  const channel = interaction.channel;
+  const meta = db.get(`ticket_${channel.id}`, null);
+  const logId = db.get(`ticket_log_${channel.guild.id}`, null);
+  const logChannel = logId ? channel.guild.channels.cache.get(logId) : null;
+
+  if (logChannel) {
+    const file = await createTranscript(channel, meta || {});
+    await logChannel.send({
+      embeds: [
+        jarmEmbed(CONFIG.colors.error)
+          .setTitle("🔒 Ticket Kapatıldı")
+          .addFields(
+            { name: "Kanal", value: `#${channel.name}`, inline: true },
+            { name: "Kapatan", value: `${interaction.user}`, inline: true },
+            { name: "Sahip", value: meta?.ownerId ? `<@${meta.ownerId}>` : "-", inline: true },
+            { name: "Konu", value: meta?.subject || "-", inline: false }
+          )
+      ],
+      files: [file]
+    }).catch(() => {});
+  }
+
+  if (meta?.ownerId) db.delete(`open_ticket_${channel.guild.id}_${meta.ownerId}`);
+  db.delete(`ticket_${channel.id}`);
+
+  await interaction.update({
+    embeds: [okEmbed("Ticket kapatılıyor...")],
+    components: []
+  });
+
+  setTimeout(() => {
+    channel.delete("Jarm ticket kapatıldı").catch(() => {});
+  }, 4000);
+}
+
+async function lockTicket(interaction, lock) {
+  const channel = interaction.channel;
+  const meta = db.get(`ticket_${channel.id}`, null);
+
+  if (!meta) {
+    return interaction.reply({
+      embeds: [errEmbed("Bu kanal bir Jarm ticket kanalı değil.")],
+      flags: MessageFlags.Ephemeral
+    });
+  }
+
+  const targetIds = [meta.ownerId, ...(meta.added || [])].filter(Boolean);
+
+  for (const id of targetIds) {
+    await channel.permissionOverwrites.edit(id, {
+      SendMessages: lock ? false : null
+    }).catch(() => {});
+  }
+
+  meta.locked = lock;
+  db.set(`ticket_${channel.id}`, meta);
+
+  const buttons = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId("ticket_close").setLabel("Kapat").setEmoji("🔒").setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(lock ? "ticket_unlock" : "ticket_lock").setLabel(lock ? "Kilidi Aç" : "Kilitle").setEmoji(lock ? "🔓" : "🔐").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("ticket_transcript").setLabel("Transkript").setEmoji("📄").setStyle(ButtonStyle.Primary)
+  );
+
+  await interaction.update({ components: [buttons] });
+  await interaction.followUp({
+    embeds: [okEmbed(lock ? "Ticket kilitlendi." : "Ticket kilidi açıldı.")],
+    flags: MessageFlags.Ephemeral
+  });
+}
+
+async function sendTicketTranscript(interaction) {
+  const channel = interaction.channel;
+  const meta = db.get(`ticket_${channel.id}`, null);
+  const logId = db.get(`ticket_log_${channel.guild.id}`, null);
+  const logChannel = logId ? channel.guild.channels.cache.get(logId) : null;
+
+  if (!logChannel) {
+    return interaction.reply({
+      embeds: [errEmbed("Ticket log kanalı ayarlı değil.")],
+      flags: MessageFlags.Ephemeral
+    });
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  const file = await createTranscript(channel, meta || {});
+  await logChannel.send({
+    content: `📄 Transkript isteyen: ${interaction.user} | Kanal: ${channel.name}`,
+    files: [file]
+  }).catch(() => {});
+
+  await interaction.editReply({
+    embeds: [okEmbed("Transkript log kanalına gönderildi.")]
+  });
+}
+
+/* ============================================================
+   REGISTRATION SYSTEM
+============================================================ */
+
+async function applyRegistration(guild, member, data, gender, staffUser = null) {
+  const cfg = db.get(`register_${guild.id}`, null);
+  if (!cfg) throw new Error("Kayıt sistemi ayarlı değil.");
+
+  const tag = cfg.tag || "";
+  const nick = `${tag ? `${tag} ` : ""}${data.name} | ${data.age}`.slice(0, 32);
+
+  await member.setNickname(nick, "Jarm kayıt sistemi").catch(() => {});
+
+  if (cfg.unregisteredRole && guild.roles.cache.has(cfg.unregisteredRole)) {
+    await member.roles.remove(cfg.unregisteredRole, "Jarm kayıt").catch(() => {});
+  }
+
+  const rolesToAdd = [];
+  if (cfg.memberRole) rolesToAdd.push(cfg.memberRole);
+  if (gender === "male" && cfg.maleRole) rolesToAdd.push(cfg.maleRole);
+  if (gender === "female" && cfg.femaleRole) rolesToAdd.push(cfg.femaleRole);
+
+  for (const roleId of rolesToAdd) {
+    if (guild.roles.cache.has(roleId)) {
+      await member.roles.add(roleId, "Jarm kayıt").catch(() => {});
+    }
+  }
+
+  const stats = db.get(`register_stats_${guild.id}`, { total: 0, male: 0, female: 0 });
+  stats.total += 1;
+  if (gender === "male") stats.male += 1;
+  if (gender === "female") stats.female += 1;
+  db.set(`register_stats_${guild.id}`, stats);
+  db.delete(`register_pending_${guild.id}_${member.id}`);
+
+  if (cfg.logChannel && guild.channels.cache.has(cfg.logChannel)) {
+    await guild.channels.cache.get(cfg.logChannel).send({
+      embeds: [
+        jarmEmbed(CONFIG.colors.success)
+          .setTitle("📝 Kayıt Tamamlandı")
+          .setDescription(`${member} başarıyla kayıt oldu.`)
+          .addFields(
+            { name: "Yeni İsim", value: `\`${nick}\``, inline: true },
+            { name: "Cinsiyet", value: gender === "male" ? "♂ Erkek" : "♀ Kadın", inline: true },
+            { name: "Yetkili", value: staffUser ? `${staffUser}` : "Kullanıcı formu", inline: true }
+          )
+      ]
+    }).catch(() => {});
+  }
+
   return nick;
 }
 
-/* ============================ POLL ============================ */
-function pollEmbed(p) {
-  const total = Object.values(p.votes).reduce((s, a) => s + a.length, 0);
-  const emb = base(config.colors.purple).setTitle('🗳️ ' + p.question)
-    .setDescription(p.opts.map((o, idx) => { const v = (p.votes[idx] || []).length; const pct = total ? Math.round(v / total * 100) : 0; return `**${idx + 1}.** ${o}\n${bar(pct, 100)} **%${pct}** (${v} oy)`; }).join('\n\n'))
-    .setFooter({ text: `Toplam ${total} oy • Bitiş: <t:${Math.floor(p.ends / 1000)}:R>` });
-  return emb;
-}
-function pollRow(p) { return [new ActionRowBuilder().addComponents(p.opts.map((o, idx) => new ButtonBuilder().setCustomId(`poll_${p.id}_${idx}`).setLabel(`${idx + 1}`).setStyle(ButtonStyle.Primary)))]; }
+function registrationModal() {
+  const modal = new ModalBuilder()
+    .setCustomId("register_modal")
+    .setTitle("Jarm Kayıt Formu");
 
-/* ============================ MATH PARSER ============================ */
-function evalMath(expr) {
-  const clean = expr.replace(/\s/g, '');
-  const tokens = clean.match(/\d+\.?\d*|[+\-*/%^()]/g);
-  if (!tokens || tokens.join('') !== clean) throw new Error('bad');
-  const prec = { '+': 1, '-': 1, '*': 2, '/': 2, '%': 2, '^': 3 };
-  const out = [], ops = []; let prev = null;
-  for (const t of tokens) {
-    if (/^\d/.test(t)) out.push(parseFloat(t));
-    else if (t === '(') ops.push(t);
-    else if (t === ')') { while (ops.length && ops[ops.length - 1] !== '(') out.push(ops.pop()); if (!ops.length) throw new Error('bad'); ops.pop(); }
-    else { if (t === '-' && (prev === null || prev === '(' || prec[prev])) out.push(0); while (ops.length && ops[ops.length - 1] !== '(' && prec[ops[ops.length - 1]] >= prec[t] && t !== '^') ops.pop(); ops.push(t); }
-    prev = t;
-  }
-  while (ops.length) { const o = ops.pop(); if (o === '(') throw new Error('bad'); out.push(o); }
-  const st = [];
-  for (const t of out) {
-    if (typeof t === 'number') st.push(t);
-    else { const b = st.pop(), a = st.pop(); if (a === undefined || b === undefined) throw new Error('bad'); st.push(t === '+' ? a + b : t === '-' ? a - b : t === '*' ? a * b : t === '/' ? a / b : t === '%' ? a % b : Math.pow(a, b)); }
-  }
-  if (st.length !== 1 || !isFinite(st[0])) throw new Error('bad');
-  return st[0];
+  const nameInput = new TextInputBuilder()
+    .setCustomId("name")
+    .setLabel("İsmin")
+    .setStyle(TextInputStyle.Short)
+    .setMaxLength(20)
+    .setRequired(true)
+    .setPlaceholder("Örn: Arda");
+
+  const ageInput = new TextInputBuilder()
+    .setCustomId("age")
+    .setLabel("Yaşın")
+    .setStyle(TextInputStyle.Short)
+    .setMaxLength(2)
+    .setRequired(true)
+    .setPlaceholder("Örn: 18");
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(nameInput),
+    new ActionRowBuilder().addComponents(ageInput)
+  );
+
+  return modal;
 }
 
-/* ============================ KOMUTLAR ============================ */
-const commands = [
-  /* ---------- KURULUM (OTO-DESTEK-KUR) ---------- */
-  {
-    category: 'Kurulum',
-    data: new SlashCommandBuilder().setName('kurulum').setDescription('Sunucuyu A\'dan Z\'ye otomatik kurar (roller, kanallar, ticket, AI, kayıt).')
-      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-    async execute(client, i) {
-      if (!hasPerms(i, [PermissionFlagsBits.Administrator])) return deny(i, 'Yönetici gerekli.');
-      await i.deferReply();
-      const g = i.guild, me = g.members.me;
-      if (!me.permissions.has(PermissionFlagsBits.ManageRoles) || !me.permissions.has(PermissionFlagsBits.ManageChannels)) return i.editReply({ embeds: [err('Bana **Rol Yönet** ve **Kanal Yönet** yetkisi ver!')] });
-      const R = {};
-      const mkRole = async (name, color, perms) => { const r = await g.roles.create({ name, color, permissions: perms || [] , reason: 'Jarm Kurulum' }); R[name] = r; return r; };
-      await mkRole('🛡️ Kurmay', 0xE74C3C, [PermissionFlagsBits.Administrator]);
-      await mkRole('⚔️ Moderatör', 0x3498DB, [PermissionFlagsBits.KickMembers, PermissionFlagsBits.ModerateMembers, PermissionFlagsBits.ManageMessages, PermissionFlagsBits.ManageNicknames]);
-      await mkRole('🛠️ Destek Ekibi', 0x2ECC71, [PermissionFlagsBits.ManageMessages, PermissionFlagsBits.ReadMessageHistory]);
-      await mkRole('💎 VIP', 0xF1C40F, []);
-      await mkRole('🛡️ Guard Whitelist', 0x2C3E50, []);
-      await mkRole('🌟 Üye', 0x95A5A6, []);
-      await mkRole('♂ Erkek', 0x1F8BEB, []);
-      await mkRole('♀ Kadın', 0xFF7EB9, []);
-      await mkRole('• Kayıtsız', 0x7F8C8D, []);
-      await mkRole('🌱 Seviye 5', 0x2ECC71, []); await mkRole('🌿 Seviye 10', 0x27AE60, []);
-      await mkRole('🌳 Seviye 25', 0xF39C12, []); await mkRole('👑 Seviye 50', 0xE74C3C, []);
-      const EV = g.roles.everyone.id;
-      const mkCat = async (name, ow) => g.channels.create({ name, type: ChannelType.GuildCategory, permissionOverwrites: ow });
-      const mkCh = async (cat, name, topic, extra) => g.channels.create({ name, type: ChannelType.GuildText, parent: cat.id, topic: topic || null, permissionOverwrites: extra || [] });
-      const catB = await mkCat('📌 BİLGİLENDİRME', [{ id: EV, deny: [PermissionFlagsBits.SendMessages, PermissionFlagsBits.CreatePublicThreads], allow: [PermissionFlagsBits.ViewChannel] }]);
-      const catT = await mkCat('🌐 TOPLULUK', [{ id: EV, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] }]);
-      const catK = await mkCat('🚪 KAYIT', [{ id: EV, deny: [PermissionFlagsBits.SendMessages], allow: [PermissionFlagsBits.ViewChannel] }]);
-      const catD = await mkCat('🎫 DESTEK', [{ id: EV, deny: [PermissionFlagsBits.SendMessages], allow: [PermissionFlagsBits.ViewChannel] }]);
-      const catY = await mkCat('🔐 YETKİLİ', [{ id: EV, deny: [PermissionFlagsBits.ViewChannel] }, { id: R['⚔️ Moderatör'].id, allow: [PermissionFlagsBits.ViewChannel] }, { id: R['🛡️ Kurmay'].id, allow: [PermissionFlagsBits.ViewChannel] }, { id: R['🛠️ Destek Ekibi'].id, allow: [PermissionFlagsBits.ViewChannel] }]);
-      const chKurallar = await mkCh(catB, '📋・kurallar', 'Sunucu kuralları');
-      const chDuyuru = await mkCh(catB, '📢・duyurular', 'Resmi duyurular');
-      const chOylama = await mkCh(catB, '🗳️・oylama', 'Anketler');
-      const chSayac = await mkCh(catB, '📊・sayac', 'Üye sayacı');
-      const chSohbet = await mkCh(catT, '💬・sohret'.replace('reh', 'h'), 'Genel sohbet');
-      const chAI = await mkCh(catT, '🤖・jarm-ai', 'Jarm AI ile sohbet et (@Jarm)');
-      const chMedya = await mkCh(catT, '🖼️・medya', 'Görsel/video paylaşımı');
-      const chOyun = await mkCh(catT, '🎮・oyun-sohbet', 'Oyun muhabbeti');
-      const chGiris = await mkCh(catK, '👋・hoşgeldin', 'Giriş kapısı');
-      const chKayitLog = await mkCh(catK, '📝・kayıt-log', 'Kayıt logları', [{ id: R['🛠️ Destek Ekibi'].id, allow: [PermissionFlagsBits.ViewChannel] }]);
-      const chTicket = await mkCh(catD, '🎫・destek-talepleri', 'Ticket paneli');
-      const chTicketLog = await mkCh(catD, '📄・destek-log', 'Ticket transkriptleri', [{ id: R['🛠️ Destek Ekibi'].id, allow: [PermissionFlagsBits.ViewChannel] }]);
-      const chYet = await mkCh(catY, '🛡️・yetkili-sohbet');
-      const chMod = await mkCh(catY, '📚・mod-log');
-      const chGuard = await mkCh(catY, '🚨・guard-log');
-      /* DB bağları */
-      db.set(`ticket_staff_${g.id}`, R['🛠️ Destek Ekibi'].id);
-      db.set(`ticket_log_${g.id}`, chTicketLog.id);
-      db.set(`welcome_${g.id}`, chGiris.id);
-      db.set(`welcomelog_${g.id}`, chKayitLog.id);
-      db.set(`modlog_${g.id}`, chMod.id);
-      db.set(`ai_channels_${g.id}`, [chAI.id]);
-      db.set(`otorol_${g.id}`, { member: R['• Kayıtsız'].id, bot: R['💎 VIP'].id });
-      db.set(`kayit_${g.id}`, { kayitsiz: R['• Kayıtsız'].id, erkek: R['♂ Erkek'].id, kadin: R['♀ Kadın'].id, uye: R['🌟 Üye'].id, tag: '✦', log: chKayitLog.id });
-      db.set(`guard_${g.id}`, { enabled: { nuke: true, raid: true, role: true }, whitelist: [R['🛡️ Kurmay'].id, R['🛡️ Guard Whitelist'].id], log: chGuard.id });
-      db.set(`levelroles_${g.id}`, { '5': R['🌱 Seviye 5'].id, '10': R['🌿 Seviye 10'].id, '25': R['🌳 Seviye 25'].id, '50': R['👑 Seviye 50'].id });
-      db.set(`sayac_${g.id}`, { channel: chSayac.id, target: 500 });
-      db.set(`automod_${g.id}`, { kufur: true, reklam: true, link: false, caps: false, spam: true });
-      /* Paneller */
-      await chKurallar.send({ embeds: [jEmbed(client, config.colors.error).setTitle('📋 SUNUCU KURALLARI').setDescription('1️⃣ Saygı her şeydir; hakaret, taciz, nefret söylemi yasak.\n2️⃣ Reklam, davet linki ve spam yasak.\n3️⃣ +18 içerik kesinlikle yasak.\n4️⃣ Yetkililere etiketle saygılı davran.\n5️⃣ Kanal amacına uygun kullan.\n6️⃣ Bot komutlarını kötüye kullanma.\n\n⚖️ Kural ihlali = uyarı → mute → ban.')] });
-      await chGiris.send({ embeds: [jEmbed(client, config.colors.success).setTitle('👋 GİRİŞ KAPISI').setDescription('Aramıza hoş geldin! Kayıt olmak için aşağıdaki butona bas ve formu doldur. **Oy yok, bekleme yok — anında kayıt!**')], components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('reg_start').setLabel('📝 Kayıt Ol').setStyle(ButtonStyle.Success))] });
-      await chTicket.send({ embeds: [jEmbed(client, config.colors.primary).setTitle('🎫 DESTEK MERKEZİ').setDescription('Aşağıdan kategori seçerek ticket oluştur.')], components: [new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('ticket_select').setPlaceholder('Kategori seç...').addOptions(CATEGORIES.map(c => ({ label: c.label, value: c.value, description: c.desc }))))] });
-      await chAI.send({ embeds: [jEmbed(client, config.colors.ai).setTitle('🤖 JARM AI SOHBET').setDescription('Burada **@Jarm** etiketleyerek benimle sınırsız sohbet edebilirsin kral! Belleğim var, bağlamı hatırlarım. 💬')] });
-      await chDuyuru.send({ embeds: [jEmbed(client, config.colors.gold).setTitle('📢 DUYURU').setDescription('Sunucumuz Jarm v2 ile kuruldu! Tüm sistemler aktif. 🎉')] });
-      await i.editReply({ embeds: [jEmbed(client, config.colors.success).setTitle('🏗️ KURULUM TAMAMLANDI').setDescription(`**${5} kategori, ${15} kanal, ${13} rol** oluşturuldu.\n✅ Ticket paneli • ✅ Kayıt kapısı • ✅ AI kanalı • ✅ Guard • ✅ Level rolleri • ✅ Oto-mod açık`)] });
-    }
-  },
+/* ============================================================
+   GUARD
+============================================================ */
 
-  /* ---------- KAYIT ---------- */
-  {
-    category: 'Kayıt',
-    data: new SlashCommandBuilder().setName('kayıt-sistem').setDescription('Kayıt sistemini manuel kurar/günceller.')
-      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
-      .addRoleOption(o => o.setName('kayitsiz').setDescription('Kayıtsız rolü').setRequired(true))
-      .addRoleOption(o => o.setName('erkek').setDescription('Erkek rolü').setRequired(true))
-      .addRoleOption(o => o.setName('kadin').setDescription('Kadın rolü').setRequired(true))
-      .addRoleOption(o => o.setName('uye').setDescription('Kayıtlı üye rolü').setRequired(true))
-      .addStringOption(o => o.setName('tag').setDescription('İsim önü tag (örn: ✦)').setMaxLength(5))
-      .addChannelOption(o => o.setName('log').setDescription('Kayıt log kanalı')),
-    async execute(client, i) {
-      if (!hasPerms(i, [PermissionFlagsBits.ManageGuild])) return deny(i, 'Yetkin yok.');
-      db.set(`kayit_${i.guild.id}`, {
-        kayitsiz: i.options.getRole('kayitsiz').id, erkek: i.options.getRole('erkek').id,
-        kadin: i.options.getRole('kadin').id, uye: i.options.getRole('uye').id,
-        tag: i.options.getString('tag') || '', log: i.options.getChannel('log') ? i.options.getChannel('log').id : null
-      });
-      await i.reply({ embeds: [ok('Kayıt sistemi ayarlandı. `/kurulum` paneli veya `📝 Kayıt Ol` butonu aktif.')] });
-    }
-  },
-  {
-    category: 'Kayıt',
-    data: new SlashCommandBuilder().setName('kayıt').setDescription('Yetkili: manuel kayıt yapar.')
-      .setDefaultMemberPermissions(PermissionFlagsBits.ManageNicknames)
-      .addUserOption(o => o.setName('kullanici').setDescription('Üye').setRequired(true))
-      .addStringOption(o => o.setName('isim').setDescription('İsim').setRequired(true).setMaxLength(20))
-      .addIntegerOption(o => o.setName('yas').setDescription('Yaş').setRequired(true).setMinValue(8).setMaxValue(99))
-      .addStringOption(o => o.setName('cinsiyet').setDescription('Cinsiyet').setRequired(true).addChoices({ name: 'Erkek', value: 'm' }, { name: 'Kadın', value: 'f' })),
-    async execute(client, i) {
-      if (!hasPerms(i, [PermissionFlagsBits.ManageNicknames])) return deny(i, 'Yetkin yok.');
-      const member = await i.guild.members.fetch(i.options.getUser('kullanici').id).catch(() => null);
-      if (!member) return deny(i, 'Üye bulunamadı.');
-      try {
-        const nick = await applyRegistration(client, i.guild, member, { name: i.options.getString('isim'), age: i.options.getInteger('yas') }, i.options.getString('cinsiyet'), i.user);
-        await i.reply({ embeds: [ok(`${member} kaydedildi → \`${nick}\``)] });
-      } catch (e) { await i.reply({ embeds: [err(e.message)] }); }
-    }
-  },
-  {
-    category: 'Kayıt',
-    data: new SlashCommandBuilder().setName('kayıt-bilgi').setDescription('Kayıt istatistiklerini gösterir.'),
-    async execute(client, i) {
-      const s = db.get(`kayitstats_${i.guild.id}`, null) || { total: 0, m: 0, f: 0 };
-      await i.reply({ embeds: [jEmbed(client, config.colors.primary).setTitle('📝 KAYIT İSTATİSTİKLERİ').addFields({ name: 'Toplam', value: `${s.total}`, inline: true }, { name: '♂ Erkek', value: `${s.m}`, inline: true }, { name: '♀ Kadın', value: `${s.f}`, inline: true })] });
-    }
-  },
+const guardActions = new Map();
+const joinTracker = new Map();
 
-  /* ---------- AI ---------- */
-  {
-    category: 'AI',
-    data: new SlashCommandBuilder().setName('ai-kanal').setDescription('AI sohbet kanallarını yönetir.')
-      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
-      .addStringOption(o => o.setName('islem').setDescription('İşlem').setRequired(true).addChoices({ name: 'ekle', value: 'add' }, { name: 'sil', value: 'rem' }, { name: 'liste', value: 'list' }))
-      .addChannelOption(o => o.setName('kanal').setDescription('Kanal')),
-    async execute(client, i) {
-      if (!hasPerms(i, [PermissionFlagsBits.ManageGuild])) return deny(i, 'Yetkin yok.');
-      const op = i.options.getString('islem'), ch = i.options.getChannel('kanal');
-      let list = db.get(`ai_channels_${i.guild.id}`, null) || [];
-      if (op === 'add') { if (!ch) return deny(i, 'Kanal belirt.'); if (!list.includes(ch.id)) list.push(ch.id); db.set(`ai_channels_${i.guild.id}`, list); return i.reply({ embeds: [ok(`${ch} AI kanalı oldu.`)] }); }
-      if (op === 'rem') { list = list.filter(x => x !== (ch ? ch.id : i.channel.id)); db.set(`ai_channels_${i.guild.id}`, list); return i.reply({ embeds: [ok('AI kanalı kaldırıldı.')] }); }
-      return i.reply({ embeds: [info(list.length ? list.map(x => `<#${x}>`).join('\n') : 'AI kanalı yok.')] });
-    }
-  },
-  {
-    category: 'AI',
-    data: new SlashCommandBuilder().setName('ai-sor').setDescription('Jarm AI\'a direkt soru sor.')
-      .addStringOption(o => o.setName('soru').setDescription('Sorun').setRequired(true).setMaxLength(1000)),
-    async execute(client, i) {
-      await i.deferReply();
-      const q = i.options.getString('soru');
-      if (AI_BAD.some(r => r.test(q))) return i.editReply({ embeds: [err('Bu konuda yardımcı olamam.')] });
-      aiPush(i.user.id, 'user', q);
-      const ans = await aiComplete([{ role: 'system', content: AI_SYSTEM }, ...(aiMemory.get(i.user.id) || [])]);
-      if (!ans) return i.editReply({ embeds: [err('AI motoruna ulaşılamadı (GROQ_API_KEY kontrol et).')] });
-      aiPush(i.user.id, 'assistant', ans);
-      await i.editReply({ embeds: split2000(ans).map((c, idx) => jEmbed(client, config.colors.ai).setDescription(c).setAuthor(idx === 0 ? { name: `Jarm AI • ${i.user.username}`, iconURL: i.user.displayAvatarURL() } : null)) });
-    }
-  },
+function getGuard(guildId) {
+  return db.get(`guard_${guildId}`, {
+    enabled: false,
+    antiNuke: true,
+    antiRaid: true,
+    antiRole: true,
+    logChannel: null,
+    whitelistRoles: [],
+    whitelistUsers: []
+  });
+}
 
-  /* ---------- GUARD ---------- */
-  {
-    category: 'Guard',
-    data: new SlashCommandBuilder().setName('guard').setDescription('Koruma sistemini yönetir.')
-      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-      .addStringOption(o => o.setName('islem').setDescription('İşlem').setRequired(true).addChoices({ name: 'durum', value: 'status' }, { name: 'toggle', value: 'toggle' }, { name: 'whitelist-ekle', value: 'wladd' }, { name: 'whitelist-sil', value: 'wlrem' }, { name: 'log', value: 'log' }))
-      .addStringOption(o => o.setName('modul').setDescription('Modül').addChoices({ name: 'nuke', value: 'nuke' }, { name: 'raid', value: 'raid' }, { name: 'role', value: 'role' }))
-      .addBooleanOption(o => o.setName('durum').setDescription('Aç/Kapat'))
-      .addRoleOption(o => o.setName('rol').setDescription('Rol'))
-      .addChannelOption(o => o.setName('kanal').setDescription('Log kanalı')),
-    async execute(client, i) {
-      if (!hasPerms(i, [PermissionFlagsBits.Administrator])) return deny(i, 'Yönetici gerekli.');
-      const cfg = guardCfg(i.guild); const op = i.options.getString('islem');
-      if (op === 'log') { cfg.log = i.options.getChannel('kanal').id; db.set(`guard_${i.guild.id}`, cfg); return i.reply({ embeds: [ok('Guard log ayarlandı.')] }); }
-      if (op === 'toggle') { const m = i.options.getString('modul'), s = i.options.getBoolean('durum'); if (!m) return deny(i, 'Modül belirt.'); cfg.enabled[m] = s; db.set(`guard_${i.guild.id}`, cfg); return i.reply({ embeds: [ok(`Guard **${m}** ${s ? 'açıldı' : 'kapandı'}.`)] }); }
-      if (op === 'wladd') { const r = i.options.getRole('rol'); if (!r) return deny(i, 'Rol belirt.'); if (!cfg.whitelist.includes(r.id)) cfg.whitelist.push(r.id); db.set(`guard_${i.guild.id}`, cfg); return i.reply({ embeds: [ok(`${r} whitelist'e eklendi.')] }); }
-      if (op === 'wlrem') { const r = i.options.getRole('rol'); cfg.whitelist = cfg.whitelist.filter(x => x !== r.id); db.set(`guard_${i.guild.id}`, cfg); return i.reply({ embeds: [ok(`${r} çıkarıldı.')] }); }
-      return i.reply({ embeds: [jEmbed(client, config.colors.guard).setTitle('🛡️ GUARD DURUMU').addFields({ name: 'Modüller', value: Object.entries(cfg.enabled).map(([k, v]) => `\`${k}\`: ${v ? '✅' : '❌'}`).join('\n'), inline: true }, { name: 'Whitelist', value: cfg.whitelist.map(x => `<@&${x}>`).join('\n') || '-', inline: true }, { name: 'Log', value: cfg.log ? `<#${cfg.log}>` : '-', inline: true })] });
-    }
-  },
+function isGuardWhitelisted(guild, userId) {
+  const cfg = getGuard(guild.id);
+  if (userId === guild.ownerId) return true;
+  if (userId === guild.members.me?.id) return true;
+  if (cfg.whitelistUsers.includes(userId)) return true;
 
-  /* ---------- LEVEL ---------- */
-  {
-    category: 'Level',
-    data: new SlashCommandBuilder().setName('level').setDescription('Seviye kartını gösterir.').addUserOption(o => o.setName('kullanici').setDescription('Üye')),
-    async execute(client, i) {
-      const u = i.options.getUser('kullanici') || i.user;
-      const d = xpData(i.guild.id, u.id);
-      const cur = d.xp - xpForLevel(d.level), need = xpForLevel(d.level + 1) - xpForLevel(d.level);
-      await i.reply({ embeds: [jEmbed(client, config.colors.gold).setAuthor({ name: `${u.username} — Seviye Kartı`, iconURL: u.displayAvatarURL() }).setThumbnail(u.displayAvatarURL({ size: 512 })).addFields({ name: '🏆 Seviye', value: `**${d.level}**`, inline: true }, { name: '✨ XP', value: `${d.xp}`, inline: true }, { name: '💬 Mesaj', value: `${d.msgs}`, inline: true }, { name: 'İlerleme', value: `${bar(cur, need)} ${Math.round(cur / need * 100)}%`, inline: false })] });
-    }
-  },
-  {
-    category: 'Level',
-    data: new SlashCommandBuilder().setName('liderlik').setDescription('Seviye sıralaması (top 10).'),
-    async execute(client, i) {
-      const rows = db.startsWith(`xp_${i.guild.id}_`).map(([k, v]) => ({ id: k.split('_')[2], ...v })).sort((a, b) => b.xp - a.xp).slice(0, 10);
-      if (!rows.length) return i.reply({ embeds: [info('Henüz veri yok.')] });
-      const medals = ['🥇', '🥈', '🥉'];
-      await i.reply({ embeds: [jEmbed(client, config.colors.gold).setTitle('🏆 SEVİYE LİDERLİĞİ').setDescription(rows.map((r, idx) => `${medals[idx] || `**${idx + 1}.**`} <@${r.id}> — **Lv ${r.level}** (${r.xp} XP)`).join('\n'))] });
-    }
-  },
-  {
-    category: 'Level',
-    data: new SlashCommandBuilder().setName('level-rol').setDescription('Seviye ödül rolleri.')
-      .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
-      .addIntegerOption(o => o.setName('seviye').setDescription('Seviye').setRequired(true).setMinValue(1))
-      .addRoleOption(o => o.setName('rol').setDescription('Rol (boş=sil)')),
-    async execute(client, i) {
-      if (!hasPerms(i, [PermissionFlagsBits.ManageRoles])) return deny(i, 'Yetkin yok.');
-      const lvl = i.options.getInteger('seviye'), role = i.options.getRole('rol');
-      const map = db.get(`levelroles_${i.guild.id}`, null) || {};
-      if (role) map[String(lvl)] = role.id; else delete map[String(lvl)];
-      db.set(`levelroles_${i.guild.id}`, map);
-      await i.reply({ embeds: [ok(`Seviye ${lvl} → ${role || 'temizlendi'}`)] });
-    }
-  },
+  const member = guild.members.cache.get(userId);
+  if (!member) return false;
 
-  /* ---------- EKSTRA (12+) ---------- */
-  { category: 'Ekstra', data: new SlashCommandBuilder().setName('afk').setDescription('AFK moduna geçersin.').addStringOption(o => o.setName('sebep').setDescription('Sebep')), async execute(client, i) { db.set(`afk_${i.user.id}`, { r: i.options.getString('sebep') || 'Belirtilmedi', t: Date.now() }); await i.reply({ embeds: [ok(`AFK oldun: \`${i.options.getString('sebep') || 'Belirtilmedi'}\``)] }); } },
-  { category: 'Ekstra', data: new SlashCommandBuilder().setName('snipe').setDescription('Kanalda silinen son mesajı gösterir.'), async execute(client, i) { const s = snipes.get(i.channel.id); if (!s) return i.reply({ embeds: [info('Bu kanalda silinmiş mesaj yok.')] }); await i.reply({ embeds: [jEmbed(client, config.colors.purple).setTitle('🕵️ SNIPED').setDescription(`**${s.tag}:** ${s.content || '(ek/içerik yok)'}\n<t:${Math.floor(s.t / 1000)}:R>`)] }); } },
-  {
-    category: 'Ekstra',
-    data: new SlashCommandBuilder().setName('anket').setDescription('Butonlu anket oluşturur.')
-      .addStringOption(o => o.setName('soru').setDescription('Soru').setRequired(true))
-      .addStringOption(o => o.setName('secenekler').setDescription('A | B | C (max 5)').setRequired(true))
-      .addIntegerOption(o => o.setName('dakika').setDescription('Süre').setMinValue(1).setMaxValue(1440)),
-    async execute(client, i) {
-      const opts = i.options.getString('secenekler').split('|').map(s => s.trim()).filter(Boolean).slice(0, 5);
-      if (opts.length < 2) return deny(i, 'En az 2 seçenek (A | B).');
-      const p = { id: crypto.randomBytes(4).toString('hex'), question: i.options.getString('soru'), opts, votes: {}, ends: Date.now() + (i.options.getInteger('dakika') || 60) * 60000, owner: i.user.id };
-      db.set(`poll_${p.id}`, p);
-      const msg = await i.channel.send({ embeds: [pollEmbed(p)], components: pollRow(p) });
-      p.msg = msg.id; db.set(`poll_${p.id}`, p);
-      await i.reply({ embeds: [ok('Anket oluşturuldu.')], flags: MessageFlags.Ephemeral });
-    }
-  },
-  { category: 'Ekstra', data: new SlashCommandBuilder().setName('yazıtura').setDescription('Para atar.'), async execute(client, i) { const r = Math.random() < 0.5 ? 'YAZI' : 'TURA'; await i.reply({ embeds: [jEmbed(client, config.colors.gold).setTitle('🪙 PARA ATILDI').setDescription(`Sonuç: **${r}**!`)] }); } },
-  { category: 'Ekstra', data: new SlashCommandBuilder().setName('zar').setDescription('Zar atar.').addIntegerOption(o => o.setName('yuz').setDescription('Yüz sayısı').setMinValue(2).setMaxValue(1000)), async execute(client, i) { const n = i.options.getInteger('yuz') || 6; const r = 1 + Math.floor(Math.random() * n); await i.reply({ embeds: [jEmbed(client, config.colors.primary).setTitle('🎲 ZAR').setDescription(`d${n} → **${r}**`)] }); } },
-  { category: 'Ekstra', data: new SlashCommandBuilder().setName('8ball').setDescription('Sihirli küreye sor.').addStringOption(o => o.setName('soru').setDescription('Soru').setRequired(true)), async execute(client, i) { const a = ['Evet, kesinlikle.', 'Hayır, asla.', 'Büyük ihtimalle evet.', 'Şüpheli...', 'Kader senin elinde kral.', 'Yıldızlar evet diyor.', 'Bu konuda yorum yok.', 'Sabret, zaman gösterecek.']; await i.reply({ embeds: [jEmbed(client, config.colors.purple).setTitle('🎱 8-BALL').setDescription(`**S:** ${i.options.getString('soru')}\n**C:** ${a[Math.floor(Math.random() * a.length)]}`)] }); } },
-  { category: 'Ekstra', data: new SlashCommandBuilder().setName('ship').setDescription('İki kişiyi shiple.').addUserOption(o => o.setName('kisi1').setDescription('1. kişi').setRequired(true)).addUserOption(o => o.setName('kisi2').setDescription('2. kişi').setRequired(true)), async execute(client, i) { const a = i.options.getUser('kisi1'), b = i.options.getUser('kisi2'); const h = crypto.createHash('md5').update(a.id + b.id).digest(); const pct = h.readUInt16BE(0) % 101; await i.reply({ embeds: [jEmbed(client, 0xFF7EB9).setTitle('💘 SHIP METRE').setDescription(`${a} ❤️ ${b}\n${bar(pct, 100)} **%${pct}** uyum!`)] }); } },
-  { category: 'Ekstra', data: new SlashCommandBuilder().setName('matematik').setDescription('Güvenli matematik hesabı.').addStringOption(o => o.setName('islem').setDescription('Örn: (5+3)*2^2').setRequired(true)), async execute(client, i) { try { const r = evalMath(i.options.getString('islem')); await i.reply({ embeds: [jEmbed(client, config.colors.primary).setTitle('🧮 MATEMATİK').setDescription(`\`${i.options.getString('islem')} = ${r}\``)] }); } catch { await i.reply({ embeds: [err('Geçersiz ifade.')] }); } } },
-  { category: 'Ekstra', data: new SlashCommandBuilder().setName('şifre').setDescription('Güçlü şifre üretir.').addIntegerOption(o => o.setName('uzunluk').setDescription('8-64').setMinValue(8).setMaxValue(64)), async execute(client, i) { const len = i.options.getInteger('uzunluk') || 16; const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%^&*'; let s = ''; const rb = crypto.randomBytes(len); for (let x = 0; x < len; x++) s += chars[rb[x] % chars.length]; await i.reply({ embeds: [jEmbed(client, config.colors.success).setTitle('🔐 ŞİFRE').setDescription(`\`${s}\``)], flags: MessageFlags.Ephemeral }); } },
-  { category: 'Ekstra', data: new SlashCommandBuilder().setName('renk').setDescription('Rastgele renk paleti üretir.'), async execute(client, i) { const hex = crypto.randomBytes(3).toString('hex'); await i.reply({ embeds: [new EmbedBuilder().setColor(parseInt(hex, 16)).setTitle('🎨 RENK').setDescription(`#${hex.toUpperCase()}`).setThumbnail(`https://singlecolorimage.com/get/${hex}/128x128`)] }); } },
-  { category: 'Ekstra', data: new SlashCommandBuilder().setName('hatırlat').setDescription('Hatırlatıcı kurar.').addIntegerOption(o => o.setName('dakika').setDescription('Süre').setRequired(true).setMinValue(1).setMaxValue(10080)).addStringOption(o => o.setName('metin').setDescription('Ne hatırlatayım?').setRequired(true)), async execute(client, i) { const list = db.get('reminders', null) || []; list.push({ u: i.user.id, t: Date.now() + i.options.getInteger('dakika') * 60000, m: i.options.getString('metin') }); db.set('reminders', list); await i.reply({ embeds: [ok(`⏰ ${i.options.getInteger('dakika')} dakika sonra hatırlatacağım: \`${i.options.getString('metin')}\``)] }); } },
-  {
-    category: 'Ekstra',
-    data: new SlashCommandBuilder().setName('profil').setDescription('Detaylı profil kartı.').addUserOption(o => o.setName('kullanici').setDescription('Üye')),
-    async execute(client, i) {
-      const m = i.options.getMember('kullanici') || i.member; const u = m.user;
-      const d = xpData(i.guild.id, u.id); const warns = getRecords(i.guild, u.id).filter(r => r.type === 'WARN').length;
-      const badges = []; if (d.level >= 10) badges.push('🏆'); if (d.msgs >= 500) badges.push('💬'); if (warns === 0) badges.push('😇'); if (u.bot) badges.push('🤖'); if (config.owners.includes(u.id)) badges.push('👑');
-      await i.reply({ embeds: [jEmbed(client, config.colors.purple).setAuthor({ name: `${u.username} — Profil Kartı`, iconURL: u.displayAvatarURL() }).setImage(u.bannerURL ? u.bannerURL({ size: 512 }) : null).setThumbnail(u.displayAvatarURL({ size: 512 })).addFields(
-        { name: '🆔 ID', value: `\`${u.id}\``, inline: true }, { name: '🏆 Seviye', value: `${d.level} (${d.xp} XP)`, inline: true }, { name: '⚠️ Uyarı', value: `${warns}`, inline: true },
-        { name: '📅 Hesap', value: `<t:${Math.floor(u.createdTimestamp / 1000)}:R>`, inline: true }, { name: '🚪 Katılım', value: m.joinedTimestamp ? `<t:${Math.floor(m.joinedTimestamp / 1000)}:R>` : '-', inline: true }, { name: '🎖️ Rozetler', value: badges.join(' ') || '-', inline: true },
-        { name: '🎭 Roller', value: m.roles.cache.filter(r => r.id !== i.guild.id).sort((a, b) => b.position - a.position).map(r => `${r}`).slice(0, 8).join(' ') || '-', inline: false })] });
-    }
-  },
+  return member.roles.cache.some(r => cfg.whitelistRoles.includes(r.id));
+}
 
-  /* ---------- TICKET ---------- */
-  { category: 'Ticket', data: new SlashCommandBuilder().setName('ticket-setup').setDescription('Ticket paneli kurar.').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).addRoleOption(o => o.setName('staff').setDescription('Yetkili rolü').setRequired(true)).addChannelOption(o => o.setName('log').setDescription('Log kanalı').setRequired(true)).addChannelOption(o => o.setName('panel').setDescription('Panel kanalı')), async execute(client, i) { db.set(`ticket_staff_${i.guild.id}`, i.options.getRole('staff').id); db.set(`ticket_log_${i.guild.id}`, i.options.getChannel('log').id); const p = i.options.getChannel('panel') || i.channel; await p.send({ embeds: [jEmbed(client).setTitle('🎫 DESTEK MERKEZİ').setDescription('Kategori seç, ticket açılsın.')], components: [new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('ticket_select').setPlaceholder('Kategori...').addOptions(CATEGORIES.map(c => ({ label: c.label, value: c.value, description: c.desc }))))] }); await i.reply({ embeds: [ok('Panel kuruldu.')], flags: MessageFlags.Ephemeral }); } },
-  { category: 'Ticket', data: new SlashCommandBuilder().setName('ticket-add').setDescription('Tickete kullanıcı ekler.').addUserOption(o => o.setName('kullanici').setDescription('Üye').setRequired(true)), async execute(client, i) { const ch = i.channel; if (!ch.topic || !ch.topic.startsWith('Ticket |')) return deny(i, 'Ticket kanalı değil.'); const u = i.options.getUser('kullanici'); const meta = db.get(`ticket_${ch.id}`, null) || { added: [] }; await ch.permissionOverwrites.edit(u.id, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true }); if (!meta.added.includes(u.id)) meta.added.push(u.id); db.set(`ticket_${ch.id}`, meta); await i.reply({ embeds: [ok(`${u} eklendi.`)] }); } },
-  { category: 'Ticket', data: new SlashCommandBuilder().setName('ticket-remove').setDescription('Ticketten kullanıcı çıkarır.').addUserOption(o => o.setName('kullanici').setDescription('Üye').setRequired(true)), async execute(client, i) { const ch = i.channel; if (!ch.topic || !ch.topic.startsWith('Ticket |')) return deny(i, 'Ticket kanalı değil.'); const u = i.options.getUser('kullanici'); const meta = db.get(`ticket_${ch.id}`, null) || { added: [] }; await ch.permissionOverwrites.edit(u.id, { ViewChannel: false, SendMessages: false }); meta.added = meta.added.filter(x => x !== u.id); db.set(`ticket_${ch.id}`, meta); await i.reply({ embeds: [ok(`${u} çıkarıldı.`)] }); } },
-  { category: 'Ticket', data: new SlashCommandBuilder().setName('ticket-close').setDescription('Ticketi kapatır.'), async execute(client, i) { if (!i.channel.topic || !i.channel.topic.startsWith('Ticket |')) return deny(i, 'Ticket kanalı değil.'); await askClose(i); } },
+async function guardLog(guild, embed) {
+  const cfg = getGuard(guild.id);
+  if (!cfg.logChannel) return;
+  const ch = guild.channels.cache.get(cfg.logChannel);
+  if (!ch) return;
+  await ch.send({ embeds: [embed] }).catch(() => {});
+}
 
-  /* ---------- MODERASYON ---------- */
-  { category: 'Moderasyon', data: new SlashCommandBuilder().setName('ban').setDescription('Ban.').setDefaultMemberPermissions(PermissionFlagsBits.BanMembers).addUserOption(o => o.setName('kullanici').setDescription('Üye').setRequired(true)).addStringOption(o => o.setName('sebep').setDescription('Sebep')).addIntegerOption(o => o.setName('gun').setDescription('Mesaj silme günü 0-7').setMinValue(0).setMaxValue(7)), async execute(client, i) { if (!hasPerms(i, [PermissionFlagsBits.BanMembers])) return deny(i, 'Yetkin yok.'); const t = await i.guild.members.fetch(i.options.getUser('kullanici').id).catch(() => null); if (!t) return deny(i, 'Bulunamadı.'); if (!hierarchyOk(i, t)) return deny(i, 'Hiyerarşi.'); const r = i.options.getString('sebep') || 'Belirtilmedi'; await i.guild.members.ban(t.id, { deleteMessageSeconds: (i.options.getInteger('gun') ?? 0) * 86400, reason: r }); addRecord(client, i.guild, t.id, 'BAN', i.user, r); await i.reply({ embeds: [ok(`**${t.user.tag}** banlandı.`)] }); } },
-  { category: 'Moderasyon', data: new SlashCommandBuilder().setName('unban').setDescription('Ban kaldırır.').setDefaultMemberPermissions(PermissionFlagsBits.BanMembers).addStringOption(o => o.setName('kullanici_id').setDescription('ID').setRequired(true)), async execute(client, i) { if (!hasPerms(i, [PermissionFlagsBits.BanMembers])) return deny(i, 'Yetkin yok.'); const id = i.options.getString('kullanici_id'); try { await i.guild.members.unban(id); addRecord(client, i.guild, id, 'UNBAN', i.user, ''); await i.reply({ embeds: [ok(`<@${id}> unban.`)] }); } catch { deny(i, 'Banlı değil.'); } } },
-  { category: 'Moderasyon', data: new SlashCommandBuilder().setName('kick').setDescription('Kick.').setDefaultMemberPermissions(PermissionFlagsBits.KickMembers).addUserOption(o => o.setName('kullanici').setDescription('Üye').setRequired(true)).addStringOption(o => o.setName('sebep').setDescription('Sebep')), async execute(client, i) { if (!hasPerms(i, [PermissionFlagsBits.KickMembers])) return deny(i, 'Yetkin yok.'); const t = await i.guild.members.fetch(i.options.getUser('kullanici').id).catch(() => null); if (!t || !hierarchyOk(i, t)) return deny(i, 'Hiyerarşi/bulunamadı.'); const r = i.options.getString('sebep') || 'Belirtilmedi'; await t.kick(r); addRecord(client, i.guild, t.id, 'KICK', i.user, r); await i.reply({ embeds: [ok(`**${t.user.tag}** atıldı.`)] }); } },
-  { category: 'Moderasyon', data: new SlashCommandBuilder().setName('timeout').setDescription('Susturur.').setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers).addUserOption(o => o.setName('kullanici').setDescription('Üye').setRequired(true)).addIntegerOption(o => o.setName('dakika').setDescription('Dakika').setRequired(true).setMinValue(1).setMaxValue(40320)).addStringOption(o => o.setName('sebep').setDescription('Sebep')), async execute(client, i) { if (!hasPerms(i, [PermissionFlagsBits.ModerateMembers])) return deny(i, 'Yetkin yok.'); const t = await i.guild.members.fetch(i.options.getUser('kullanici').id).catch(() => null); if (!t || !hierarchyOk(i, t) || !t.moderatable) return deny(i, 'Uygulanamaz.'); const m = i.options.getInteger('dakika'), r = i.options.getString('sebep') || 'Belirtilmedi'; await t.timeout(m * 60000, r); addRecord(client, i.guild, t.id, 'TIMEOUT', i.user, `${m}dk ${r}`); await i.reply({ embeds: [ok(`${t} ${m}dk susturuldu.`)] }); } },
-  { category: 'Moderasyon', data: new SlashCommandBuilder().setName('untimeout').setDescription('Susturma kaldırır.').setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers).addUserOption(o => o.setName('kullanici').setDescription('Üye').setRequired(true)), async execute(client, i) { const t = await i.guild.members.fetch(i.options.getUser('kullanici').id).catch(() => null); if (!t || !t.isCommunicationDisabled()) return deny(i, 'Susturulmamış.'); await t.timeout(null); await i.reply({ embeds: [ok('Açıldı.')] }); } },
-  { category: 'Moderasyon', data: new SlashCommandBuilder().setName('warn').setDescription('Uyarır.').setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers).addUserOption(o => o.setName('kullanici').setDescription('Üye').setRequired(true)).addStringOption(o => o.setName('sebep').setDescription('Sebep').setRequired(true)), async execute(client, i) { if (!hasPerms(i, [PermissionFlagsBits.ModerateMembers])) return deny(i, 'Yetkin yok.'); const t = await i.guild.members.fetch(i.options.getUser('kullanici').id).catch(() => null); if (!t) return deny(i, 'Bulunamadı.'); const id = addRecord(client, i.guild, t.id, 'WARN', i.user, i.options.getString('sebep')); await i.reply({ embeds: [ok(`${t} uyarıldı (\`${id}\`).`)] }); } },
-  { category: 'Moderasyon', data: new SlashCommandBuilder().setName('warnings').setDescription('Uyarı listesi.').addUserOption(o => o.setName('kullanici').setDescription('Üye').setRequired(true)), async execute(client, i) { const u = i.options.getUser('kullanici'); const rs = getRecords(i.guild, u.id).filter(r => r.type === 'WARN'); if (!rs.length) return i.reply({ embeds: [info('Uyarı yok.')] }); await i.reply({ embeds: [base(config.colors.warn).setTitle(`⚠️ ${u.tag}`).setDescription(rs.map(r => `\`${r.id}\` ${r.reason} — <t:${Math.floor(r.date / 1000)}:R>`).join('\n'))] }); } },
-  { category: 'Moderasyon', data: new SlashCommandBuilder().setName('clearwarn').setDescription('Uyarıları temizler.').setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers).addUserOption(o => o.setName('kullanici').setDescription('Üye').setRequired(true)), async execute(client, i) { const u = i.options.getUser('kullanici'); db.set(`sicil_${i.guild.id}_${u.id}`, getRecords(i.guild, u.id).filter(r => r.type !== 'WARN')); await i.reply({ embeds: [ok('Temizlendi.')] }); } },
-  { category: 'Moderasyon', data: new SlashCommandBuilder().setName('sil').setDescription('Mesaj siler.').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages).addIntegerOption(o => o.setName('miktar').setDescription('1-100').setRequired(true).setMinValue(1).setMaxValue(100)).addBooleanOption(o => o.setName('sadece_bot').setDescription('Sadece bot')), async execute(client, i) { await i.deferReply({ flags: MessageFlags.Ephemeral }); const f = await i.channel.messages.fetch({ limit: i.options.getInteger('miktar') }); let l = i.options.getBoolean('sadece_bot') ? f.filter(m => m.author.bot) : f; l = l.filter(m => Date.now() - m.createdTimestamp < 1209600000); if (!l.size) return i.editReply({ embeds: [err('Silinecek mesaj yok.')] }); await i.channel.bulkDelete(l, true).catch(() => {}); await i.editReply({ embeds: [ok(`${l.size} mesaj silindi.`)] }); } },
-  { category: 'Moderasyon', data: new SlashCommandBuilder().setName('kilitle').setDescription('Kanalı kilitler.').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels), async execute(client, i) { await i.channel.permissionOverwrites.edit(i.guild.roles.everyone.id, { SendMessages: false }); await i.reply({ embeds: [ok('🔒 Kilitlendi.')] }); } },
-  { category: 'Moderasyon', data: new SlashCommandBuilder().setName('kilit-aç').setDescription('Kilit açar.').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels), async execute(client, i) { await i.channel.permissionOverwrites.edit(i.guild.roles.everyone.id, { SendMessages: null }); await i.reply({ embeds: [ok('🔓 Açıldı.')] }); } },
-  { category: 'Moderasyon', data: new SlashCommandBuilder().setName('sicil').setDescription('Ceza geçmişi.').addUserOption(o => o.setName('kullanici').setDescription('Üye').setRequired(true)), async execute(client, i) { const u = i.options.getUser('kullanici'); const rs = getRecords(i.guild, u.id); await i.reply({ embeds: [jEmbed(client, config.colors.purple).setTitle(`📒 ${u.tag}`).setDescription(rs.length ? rs.slice(-8).map(r => `\`${r.id}\` **${r.type}** — ${r.reason} (${r.modTag})`).join('\n') : 'Sicil temiz ✅')] }); } },
-  { category: 'Moderasyon', data: new SlashCommandBuilder().setName('modlog').setDescription('Modlog kanalı.').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).addChannelOption(o => o.setName('kanal').setDescription('Kanal').setRequired(true)), async execute(client, i) { db.set(`modlog_${i.guild.id}`, i.options.getChannel('kanal').id); await i.reply({ embeds: [ok('Ayarlandı.')] }); } },
+async function punishGuard(guild, executorId, reason) {
+  const member = await guild.members.fetch(executorId).catch(() => null);
 
-  /* ---------- OTO-MOD ---------- */
-  { category: 'Oto-Mod', data: new SlashCommandBuilder().setName('automod').setDescription('Oto-mod yönetimi.').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).addStringOption(o => o.setName('sistem').setDescription('Sistem').setRequired(true).addChoices({ name: 'küfür', value: 'kufur' }, { name: 'reklam', value: 'reklam' }, { name: 'link', value: 'link' }, { name: 'caps', value: 'caps' }, { name: 'spam', value: 'spam' })).addBooleanOption(o => o.setName('durum').setDescription('Aç/Kapat').setRequired(true)).addStringOption(o => o.setName('kelime').setDescription('Özel kelime ekle')), async execute(client, i) { const s = i.options.getString('sistem'), on = i.options.getBoolean('durum'); const c = db.get(`automod_${i.guild.id}`, null) || {}; c[s] = on; db.set(`automod_${i.guild.id}`, c); const w = i.options.getString('kelime'); if (w) { const arr = db.get(`automod_words_${i.guild.id}`, null) || []; if (!arr.includes(w.toLowerCase())) arr.push(w.toLowerCase()); db.set(`automod_words_${i.guild.id}`, arr); } await i.reply({ embeds: [ok(`**${s}** ${on ? 'açıldı' : 'kapandı'}.`)] }); } },
-  { category: 'Oto-Mod', data: new SlashCommandBuilder().setName('otorol').setDescription('Oto-rol ayarlar.').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).addRoleOption(o => o.setName('uye_rol').setDescription('Üye rolü')).addRoleOption(o => o.setName('bot_rol').setDescription('Bot rolü')).addBooleanOption(o => o.setName('kapat').setDescription('Kapat')), async execute(client, i) { if (i.options.getBoolean('kapat')) { db.delete(`otorol_${i.guild.id}`); return i.reply({ embeds: [ok('Kapandı.')] }); } db.set(`otorol_${i.guild.id}`, { member: i.options.getRole('uye_rol') ? i.options.getRole('uye_rol').id : null, bot: i.options.getRole('bot_rol') ? i.options.getRole('bot_rol').id : null }); await i.reply({ embeds: [ok('Oto-rol ayarlandı.')] }); } },
-  { category: 'Oto-Mod', data: new SlashCommandBuilder().setName('welcome').setDescription('Karşılama/log kanalları.').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).addChannelOption(o => o.setName('karşılama').setDescription('Kanal')).addChannelOption(o => o.setName('log').setDescription('Log')), async execute(client, i) { const w = i.options.getChannel('karşılama'), l = i.options.getChannel('log'); if (w) db.set(`welcome_${i.guild.id}`, w.id); if (l) db.set(`welcomelog_${i.guild.id}`, l.id); await i.reply({ embeds: [ok('Ayarlandı.')] }); } },
-  { category: 'Oto-Mod', data: new SlashCommandBuilder().setName('sayac').setDescription('Sayaç ayarlar.').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).addChannelOption(o => o.setName('kanal').setDescription('Kanal')).addIntegerOption(o => o.setName('hedef').setDescription('Hedef').setMinValue(1)), async execute(client, i) { const c = i.options.getChannel('kanal'), t = i.options.getInteger('hedef'); if (!c || !t) { const s = db.get(`sayac_${i.guild.id}`, null); return i.reply({ embeds: [info(s ? `Hedef ${s.target}, kalan ${Math.max(0, s.target - i.guild.memberCount)}.` : 'Ayarlı değil.')] }); } db.set(`sayac_${i.guild.id}`, { channel: c.id, target: t }); await i.reply({ embeds: [ok(`Sayaç: ${t} → ${c}`)] }); } },
+  if (member && member.moderatable) {
+    await member.roles.set([], `Jarm Guard: ${reason}`).catch(() => {});
+    await member.ban({ reason: `Jarm Guard: ${reason}` }).catch(() => {});
+  }
 
-  /* ---------- EMOJİ ---------- */
-  { category: 'Emoji', data: new SlashCommandBuilder().setName('emoji-ekle').setDescription('Emoji ekler.').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuildExpressions).addStringOption(o => o.setName('isim').setDescription('İsim').setRequired(true)).addAttachmentOption(o => o.setName('gorsel').setDescription('Dosya')).addStringOption(o => o.setName('url').setDescription('URL')).addStringOption(o => o.setName('emoji').setDescription('Emoji yapıştır')), async execute(client, i) { await i.deferReply(); try { let img = null; const a = i.options.getAttachment('gorsel'), u = i.options.getString('url'), e = i.options.getString('emoji'); if (a) img = Buffer.from(await (await fetch(a.url)).arrayBuffer()); else if (u) img = Buffer.from(await (await fetch(u)).arrayBuffer()); else if (e) { const m = /<?(a)?:(\w{2,32}):(\d{17,25})>?/.exec(e); if (!m) throw new Error('parse'); img = Buffer.from(await (await fetch(`https://cdn.discordapp.com/emojis/${m[3]}.${m[1] ? 'gif' : 'png'}`)).arrayBuffer()); } else throw new Error('kaynak'); const em = await i.guild.emojis.create({ attachment: img, name: i.options.getString('isim') }); await i.editReply({ embeds: [ok(`Eklendi: ${em}`)] }); } catch (e) { await i.editReply({ embeds: [err('Eklenemedi: ' + e.message)] }); } } },
-  { category: 'Emoji', data: new SlashCommandBuilder().setName('emoji-sil').setDescription('Emoji siler.').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuildExpressions).addStringOption(o => o.setName('emoji').setDescription('Emoji/ad').setRequired(true)), async execute(client, i) { const inp = i.options.getString('emoji'); let t = null; const m = /<?(a)?:(\w{2,32}):(\d{17,25})>?/.exec(inp || ''); if (m) t = i.guild.emojis.cache.get(m[3]); if (!t) t = i.guild.emojis.cache.find(e => e.name.toLowerCase() === inp.toLowerCase()); if (!t) return deny(i, 'Bulunamadı.'); await t.delete(); await i.reply({ embeds: [ok('Silindi.')] }); } },
-  { category: 'Emoji', data: new SlashCommandBuilder().setName('emoji-bilgi').setDescription('Emoji bilgi.').addStringOption(o => o.setName('emoji').setDescription('Emoji').setRequired(true)), async execute(client, i) { const inp = i.options.getString('emoji'); const m = /<?(a)?:(\w{2,32}):(\d{17,25})>?/.exec(inp || ''); let t = m ? i.guild.emojis.cache.get(m[3]) : i.guild.emojis.cache.find(e => e.name.toLowerCase() === inp.toLowerCase()); if (!t) return deny(i, 'Yok.'); await i.reply({ embeds: [jEmbed(client).setThumbnail(t.url).setTitle(`ℹ️ ${t.name}`).addFields({ name: 'ID', value: `\`${t.id}\``, inline: true }, { name: 'Anim', value: t.animated ? 'Evet' : 'Hayır', inline: true }, { name: 'Link', value: t.url, inline: false })] }); } },
+  await guardLog(
+    guild,
+    jarmEmbed(CONFIG.colors.guard)
+      .setTitle("🚨 Jarm Guard Müdahalesi")
+      .setDescription(`Yetkisiz işlem tespit edildi.\n\n**Kişi:** <@${executorId}>\n**Sebep:** \`${reason}\`\n\nRolleri temizlendi ve ban denendi.`)
+  );
+}
 
-  /* ---------- GENEL ---------- */
-  { category: 'Genel', data: new SlashCommandBuilder().setName('yardım').setDescription('Tüm komutlar.'), async execute(client, i) { const g = {}; client.commands.forEach(c => { const cat = c.category || 'Genel'; (g[cat] = g[cat] || []).push(`\`/${c.data.name}\``); }); const emb = jEmbed(client).setTitle('📚 JARM YARDIM').setDescription(`Toplam **${client.commands.size}** komut.`); Object.entries(g).forEach(([k, v]) => emb.addFields({ name: `▸ ${k}`, value: v.join(' '), inline: false })); await i.reply({ embeds: [emb] }); } },
-  { category: 'Genel', data: new SlashCommandBuilder().setName('sunucu-bilgi').setDescription('Sunucu bilgisi.'), async execute(client, i) { const g = i.guild; const o = await g.fetchOwner().catch(() => null); await i.reply({ embeds: [jEmbed(client).setTitle(`🏰 ${g.name}`).setThumbnail(g.iconURL() || '').addFields({ name: 'Sahip', value: o ? `${o}` : '-', inline: true }, { name: 'Üye', value: `${g.memberCount}`, inline: true }, { name: 'Kanal', value: `${g.channels.cache.size}`, inline: true }, { name: 'Rol', value: `${g.roles.cache.size}`, inline: true }, { name: 'Emoji', value: `${g.emojis.cache.size}`, inline: true }, { name: 'Kuruluş', value: `<t:${Math.floor(g.createdTimestamp / 1000)}:R>`, inline: true })] }); } },
-  { category: 'Genel', data: new SlashCommandBuilder().setName('avatar').setDescription('Avatar.').addUserOption(o => o.setName('kullanici').setDescription('Üye')), async execute(client, i) { const u = (i.options.getUser('kullanici') || i.user); const url = u.displayAvatarURL({ size: 1024 }); await i.reply({ embeds: [base().setTitle(`🖼️ ${u.username}`).setImage(url)], components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setLabel('PNG').setURL(url.replace(/\.(webp|jpeg|jpg)/, '.png')).setStyle(ButtonStyle.Link))] }); } },
-  { category: 'Genel', data: new SlashCommandBuilder().setName('banner').setDescription('Banner.').addUserOption(o => o.setName('kullanici').setDescription('Üye')), async execute(client, i) { const u = await client.users.fetch(i.options.getUser('kullanici')?.id || i.user.id, { force: true }); const url = u.bannerURL({ size: 1024 }); if (!url) return i.reply({ embeds: [info('Banner yok.')], flags: MessageFlags.Ephemeral }); await i.reply({ embeds: [base().setTitle(`🎇 ${u.username}`).setImage(url)] }); } },
-  { category: 'Genel', data: new SlashCommandBuilder().setName('embed-yaz').setDescription('Embed oluşturur (modal).').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages).addChannelOption(o => o.setName('kanal').setDescription('Kanal')), async execute(client, i) { const ch = i.options.getChannel('kanal') || i.channel; const m = new ModalBuilder().setCustomId(`embed_modal:${ch.id}`).setTitle('Embed Oluşturucu'); m.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('e_title').setLabel('Başlık').setStyle(TextInputStyle.Short).setRequired(false)), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('e_desc').setLabel('Açıklama').setStyle(TextInputStyle.Paragraph).setRequired(false)), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('e_color').setLabel('Renk (#hex)').setStyle(TextInputStyle.Short).setRequired(false)), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('e_btn').setLabel('Buton: etiket | url').setStyle(TextInputStyle.Short).setRequired(false))); await i.showModal(m); } },
-  { category: 'Genel', data: new SlashCommandBuilder().setName('ping').setDescription('Bot ping.'), async execute(client, i) { await i.reply({ embeds: [jEmbed(client).setTitle('🏓 PONG').setDescription(`WS: **${client.ws.ping}ms**`)] }); } }
+async function registerGuardAction(guild, executorId, action) {
+  if (isGuardWhitelisted(guild, executorId)) return;
+
+  const key = `${guild.id}_${executorId}`;
+  const arr = (guardActions.get(key) || []).filter(t => Date.now() - t < 10000);
+  arr.push(Date.now());
+  guardActions.set(key, arr);
+
+  await guardLog(
+    guild,
+    jarmEmbed(CONFIG.colors.guard)
+      .setTitle("⚠️ Guard Uyarısı")
+      .setDescription(`<@${executorId}> tarafından \`${action}\` işlemi algılandı. Son 10 saniye: **${arr.length}/3**`)
+  );
+
+  if (arr.length >= 3) {
+    guardActions.set(key, []);
+    await punishGuard(guild, executorId, action);
+  }
+}
+
+/* ============================================================
+   AUTOMOD
+============================================================ */
+
+const defaultBadWords = [
+  "amk", "aq", "amq", "orospu", "piç", "pic", "sik", "yarrak", "kahpe",
+  "pezevenk", "ibne", "gavat", "amcık", "yavşak", "oc"
 ];
 
-/* ============================ CLIENT ============================ */
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent], partials: [Partials.Channel, Partials.Message, Partials.User, Partials.GuildMember] });
-client.commands = new Collection();
-commands.forEach(c => client.commands.set(c.data.name, c));
-
-/* ============================ READY ============================ */
-client.once('ready', async () => {
-  client.user.setPresence({ activities: [{ name: 'Jarm v2 • /yardım', type: ActivityType.Watching }], status: 'online' });
-  const body = client.commands.map(c => c.data.toJSON());
-  const rest = new REST({ version: '10' }).setToken(config.token);
-  try { if (config.devGuild) await rest.put(Routes.applicationGuildCommands(config.clientId, config.devGuild), { body }); else await rest.put(Routes.applicationCommands(config.clientId), { body }); console.log(`[CMD] ${body.length} komut yüklendi.`); } catch (e) { console.error('[CMD]', e.message); }
-  console.log(`[BOT] ${client.user.tag} online.`);
-});
-
-/* ============================ INTERACTION ============================ */
-client.on('interactionCreate', async (i) => {
-  try {
-    if (i.isChatInputCommand()) { const c = client.commands.get(i.commandName); if (c) await c.execute(client, i); return; }
-    if (i.isStringSelectMenu() && i.customId === 'ticket_select') return await openTicketModal(i, i.values[0]);
-    if (i.isModalSubmit()) {
-      if (i.customId.startsWith('ticket_modal:')) return await createTicket(client, i);
-      if (i.customId === 'reg_modal') {
-        const name = i.fields.getTextInputValue('reg_name').trim();
-        const age = parseInt(i.fields.getTextInputValue('reg_age'), 10);
-        if (!name || isNaN(age) || age < 8 || age > 99) return i.reply({ embeds: [err('Geçersiz isim/yaş (8-99).')], flags: MessageFlags.Ephemeral });
-        db.set(`regpending_${i.guild.id}_${i.user.id}`, { name, age });
-        return i.reply({ embeds: [jEmbed(client, config.colors.success).setTitle('📝 KAYIT FORMU').setDescription(`İsim: \`${name}\` | Yaş: \`${age}\`\nŞimdi cinsiyetini seç:`)], components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('reg_male').setLabel('♂ Erkek').setStyle(ButtonStyle.Primary), new ButtonBuilder().setCustomId('reg_female').setLabel('♀ Kadın').setStyle(ButtonStyle.Secondary))], flags: MessageFlags.Ephemeral });
-      }
-      if (i.customId.startsWith('embed_modal:')) {
-        const ch = i.guild.channels.cache.get(i.customId.split(':')[1]) || i.channel;
-        const emb = base(); const col = (i.fields.getTextInputValue('e_color') || '').match(/^#?([0-9a-f]{6})$/i);
-        if (col) emb.setColor(parseInt(col[1], 16));
-        const t = i.fields.getTextInputValue('e_title'); if (t) emb.setTitle(t);
-        const d = i.fields.getTextInputValue('e_desc'); if (d) emb.setDescription(d);
-        emb.setFooter({ text: i.user.username, iconURL: i.user.displayAvatarURL() });
-        const b = i.fields.getTextInputValue('e_btn'); const comps = [];
-        if (b && b.includes('|')) { const [lb, url] = b.split('|').map(s => s.trim()); if (/^https?:\/\//.test(url || '')) comps.push(new ActionRowBuilder().addComponents(new ButtonBuilder().setLabel(lb || 'Link').setURL(url).setStyle(ButtonStyle.Link))); }
-        await ch.send({ embeds: [emb], components: comps });
-        return i.reply({ embeds: [ok('Gönderildi.')], flags: MessageFlags.Ephemeral });
-      }
-      return;
-    }
-    if (i.isButton()) {
-      const id = i.customId;
-      if (id === 'ticket_quick') return await openTicketModal(i, 'Destek');
-      if (id === 't_close') return await askClose(i);
-      if (id === 't_close_yes') return await closeTicket(i, true);
-      if (id === 't_close_no') return await closeTicket(i, false);
-      if (id === 't_lock') return await setLock(i, true);
-      if (id === 't_unlock') return await setLock(i, false);
-      if (id === 't_transcript') return await handleTranscript(i);
-      if (id === 'reg_start') return await i.showModal(new ModalBuilder().setCustomId('reg_modal').setTitle('Jarm Kayıt Formu').addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reg_name').setLabel('İsmin').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(20)), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reg_age').setLabel('Yaşın').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(2))));
-      if (id === 'reg_male' || id === 'reg_female') {
-        const pend = db.get(`regpending_${i.guild.id}_${i.user.id}`, null);
-        if (!pend) return i.update({ embeds: [err('Form bulunamadı, tekrar dene.')], components: [], flags: MessageFlags.Ephemeral });
-        const member = await i.guild.members.fetch(i.user.id).catch(() => null);
-        if (!member) return;
-        try { const nick = await applyRegistration(client, i.guild, member, pend, id === 'reg_male' ? 'm' : 'f', null); return i.update({ embeds: [jEmbed(client, config.colors.success).setTitle('🎉 KAYIT BAŞARILI').setDescription(`Hoş geldin **${nick}**! Rolün verildi, iyi eğlenceler kral. 💛`)], components: [], flags: MessageFlags.Ephemeral }); }
-        catch (e) { return i.update({ embeds: [err(e.message)], components: [], flags: MessageFlags.Ephemeral }); }
-      }
-      if (id.startsWith('poll_')) {
-        const [, pid, idxS] = id.split('_'); const p = db.get(`poll_${pid}`, null);
-        if (!p) return i.reply({ embeds: [err('Anket yok.')], flags: MessageFlags.Ephemeral });
-        if (Date.now() > p.ends) return i.reply({ embeds: [err('Anket süresi doldu.')], flags: MessageFlags.Ephemeral });
-        const idx = parseInt(idxS, 10);
-        for (const k of Object.keys(p.votes)) p.votes[k] = p.votes[k].filter(u => u !== i.user.id);
-        (p.votes[idx] = p.votes[idx] || []).push(i.user.id);
-        db.set(`poll_${pid}`, p);
-        const ch = i.guild.channels.cache.get(p.ch) || i.channel;
-        const msg = p.msg ? await ch.messages.fetch(p.msg).catch(() => null) : null;
-        if (msg) await msg.edit({ embeds: [pollEmbed(p)], components: pollRow(p) });
-        return i.deferUpdate();
-      }
-    }
-  } catch (e) {
-    console.error('[INTERACTION]', e && e.stack ? e.stack : e);
-    try { const p = { content: '❌ Hata oluştu, loglandı.', flags: MessageFlags.Ephemeral }; if (i.replied || i.deferred) await i.followUp(p); else await i.reply(p); } catch {}
-  }
-});
-
-/* ============================ MESSAGE (AUTOMOD + LEVEL + AFK + AI) ============================ */
-const DEFAULT_WORDS = ['amk', 'aq', 'amq', 'orospu', 'piç', 'sik', 'yarrak', 'kahpe', 'pezevenk', 'ibne', 'gavat', 'amcık', 'yavşak', 'oc'];
 const spamMap = new Map();
-client.on('messageCreate', async (message) => {
-  if (!message.guild || message.author.bot) return;
-  const g = message.guild;
-  /* AFK */
-  const afk = db.get(`afk_${message.author.id}`, null);
-  if (afk) { db.delete(`afk_${message.author.id}`); message.reply({ embeds: [ok(`Tekrar hoş geldin! AFK sebebin: \`${afk.r}\` (<t:${Math.floor(afk.t / 1000)}:R>)`)] }).catch(() => {}); }
-  for (const m of message.mentions.users.values()) { const a = db.get(`afk_${m.id}`, null); if (a) message.reply({ embeds: [info(`🛌 ${m} şu an AFK: \`${a.r}\` (<t:${Math.floor(a.t / 1000)}:R>)`)] }).catch(() => {}); }
-  /* AI */
-  const aiCh = db.get(`ai_channels_${g.id}`, null) || [];
-  if (message.mentions.users.has(client.user.id) || aiCh.includes(message.channel.id)) {
-    const text = message.content.replace(new RegExp(`<@!?${client.user.id}>`, 'g'), '').trim();
-    if (text) return await aiRespond(client, message, text);
+
+async function runAutomod(message) {
+  if (!message.guild || !message.member || message.author.bot) return false;
+
+  const settings = db.get(`automod_${message.guild.id}`, {
+    badword: false,
+    invite: true,
+    link: false,
+    caps: false,
+    spam: true
+  });
+
+  if (!Object.values(settings).some(Boolean)) return false;
+
+  if (
+    message.member.permissions.has(PermissionFlagsBits.ManageMessages) ||
+    message.member.permissions.has(PermissionFlagsBits.Administrator)
+  ) {
+    return false;
   }
-  /* AUTOMOD */
-  const st = db.get(`automod_${g.id}`, null) || {};
-  if (Object.values(st).some(v => v) && !message.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
-    const content = message.content || ''; const words = db.get(`automod_words_${g.id}`, null) || DEFAULT_WORDS;
-    let v = null;
-    if (st.kufur && words.some(w => content.toLowerCase().includes(w))) v = 'Küfür';
-    if (!v && st.reklam && /(discord\.gg|discord\.com\/invite)/i.test(content)) v = 'Reklam';
-    if (!v && st.link && /(https?:\/\/|www\.)/i.test(content)) v = 'Link';
-    if (!v && st.caps) { const L = content.replace(/[^a-zA-ZçğıöşüÇĞİÖŞÜ]/g, ''), U = content.replace(/[^A-ZÇĞİÖŞÜ]/g, ''); if (content.length >= 8 && L.length >= 8 && U.length / L.length > 0.7) v = 'Caps'; }
-    if (!v && st.spam) { const now = Date.now(); const arr = (spamMap.get(message.author.id) || []).filter(t => now - t < 3000); arr.push(now); spamMap.set(message.author.id, arr); if (arr.length > 4) { v = 'Spam'; spamMap.set(message.author.id, []); } }
-    if (v) {
-      await message.delete().catch(() => {});
-      const n = await message.channel.send({ embeds: [err(`${message.author}, \`${v}\` ihlali — mesaj silindi.`)] }).catch(() => null);
-      if (n) setTimeout(() => n.delete().catch(() => {}), 5000);
-      addRecord(client, g, message.author.id, 'AUTOMOD', client.user, v);
-      if (v === 'Spam') await message.member.timeout(60000, 'Anti-spam').catch(() => {});
+
+  const content = message.content || "";
+  let violation = null;
+
+  if (settings.badword) {
+    const words = db.get(`badwords_${message.guild.id}`, defaultBadWords);
+    if (words.some(w => content.toLowerCase().includes(w))) violation = "Küfür filtresi";
+  }
+
+  if (!violation && settings.invite) {
+    if (/(discord\.gg|discord\.com\/invite|discordapp\.com\/invite)/i.test(content)) {
+      violation = "Discord davet engeli";
+    }
+  }
+
+  if (!violation && settings.link) {
+    if (/(https?:\/\/|www\.)/i.test(content)) violation = "Link engeli";
+  }
+
+  if (!violation && settings.caps) {
+    const letters = content.replace(/[^a-zA-ZçğıöşüÇĞİÖŞÜ]/g, "");
+    const upper = content.replace(/[^A-ZÇĞİÖŞÜ]/g, "");
+    if (content.length >= 10 && letters.length >= 8 && upper.length / letters.length > 0.7) {
+      violation = "Caps-lock engeli";
+    }
+  }
+
+  if (!violation && settings.spam) {
+    const key = `${message.guild.id}_${message.author.id}`;
+    const recent = (spamMap.get(key) || []).filter(t => Date.now() - t < 3500);
+    recent.push(Date.now());
+    spamMap.set(key, recent);
+    if (recent.length >= 5) {
+      violation = "Anti-spam";
+      spamMap.set(key, []);
+    }
+  }
+
+  if (!violation) return false;
+
+  await message.delete().catch(() => {});
+
+  const warnMsg = await message.channel.send({
+    embeds: [errEmbed(`${message.author}, oto-moderasyon ihlali: \`${violation}\`. Mesajın silindi.`)]
+  }).catch(() => null);
+
+  if (warnMsg) setTimeout(() => warnMsg.delete().catch(() => {}), 5000);
+
+  addRecord(message.guild, message.author.id, "AUTOMOD", client.user, violation);
+
+  if (violation === "Anti-spam") {
+    await message.member.timeout(60_000, "Jarm anti-spam").catch(() => {});
+  }
+
+  return true;
+}
+
+/* ============================================================
+   MATH SAFE EVAL
+============================================================ */
+
+function calcExpression(expr) {
+  const clean = String(expr).replace(/\s/g, "");
+  if (!/^[0-9+\-*/().%^]+$/.test(clean)) throw new Error("Geçersiz ifade");
+
+  const tokens = clean.match(/\d+\.?\d*|[+\-*/%^()]/g);
+  if (!tokens || tokens.join("") !== clean) throw new Error("Geçersiz ifade");
+
+  const prec = { "+": 1, "-": 1, "*": 2, "/": 2, "%": 2, "^": 3 };
+  const out = [];
+  const ops = [];
+  let prev = null;
+
+  for (const token of tokens) {
+    if (/^\d/.test(token)) {
+      out.push(Number(token));
+    } else if (token === "(") {
+      ops.push(token);
+    } else if (token === ")") {
+      while (ops.length && ops[ops.length - 1] !== "(") out.push(ops.pop());
+      if (!ops.length) throw new Error("Parantez hatası");
+      ops.pop();
+    } else {
+      if (token === "-" && (prev === null || prev === "(" || Object.prototype.hasOwnProperty.call(prec, prev))) {
+        out.push(0);
+      }
+      while (
+        ops.length &&
+        ops[ops.length - 1] !== "(" &&
+        prec[ops[ops.length - 1]] >= prec[token] &&
+        token !== "^"
+      ) {
+        out.push(ops.pop());
+      }
+      ops.push(token);
+    }
+    prev = token;
+  }
+
+  while (ops.length) {
+    const op = ops.pop();
+    if (op === "(") throw new Error("Parantez hatası");
+    out.push(op);
+  }
+
+  const stack = [];
+  for (const item of out) {
+    if (typeof item === "number") {
+      stack.push(item);
+    } else {
+      const b = stack.pop();
+      const a = stack.pop();
+      if (a === undefined || b === undefined) throw new Error("İfade hatalı");
+      if (item === "+") stack.push(a + b);
+      else if (item === "-") stack.push(a - b);
+      else if (item === "*") stack.push(a * b);
+      else if (item === "/") stack.push(a / b);
+      else if (item === "%") stack.push(a % b);
+      else if (item === "^") stack.push(Math.pow(a, b));
+    }
+  }
+
+  if (stack.length !== 1 || !Number.isFinite(stack[0])) throw new Error("Sonuç hatalı");
+  return stack[0];
+}
+
+/* ============================================================
+   SETUP HELPERS
+============================================================ */
+
+async function findOrCreateRole(guild, name, color, permissions = []) {
+  let role = guild.roles.cache.find(r => r.name === name);
+  if (role) return role;
+
+  return guild.roles.create({
+    name,
+    color,
+    permissions,
+    reason: "Jarm otomatik sunucu kurulumu"
+  });
+}
+
+async function findOrCreateCategory(guild, name, overwrites = []) {
+  let cat = guild.channels.cache.find(c => c.name === name && c.type === ChannelType.GuildCategory);
+  if (cat) return cat;
+
+  return guild.channels.create({
+    name,
+    type: ChannelType.GuildCategory,
+    permissionOverwrites: overwrites,
+    reason: "Jarm otomatik sunucu kurulumu"
+  });
+}
+
+async function findOrCreateTextChannel(guild, parent, name, topic = null, overwrites = []) {
+  let ch = guild.channels.cache.find(c => c.name === name && c.type === ChannelType.GuildText);
+  if (ch) return ch;
+
+  return guild.channels.create({
+    name,
+    type: ChannelType.GuildText,
+    parent: parent?.id || null,
+    topic,
+    permissionOverwrites: overwrites,
+    reason: "Jarm otomatik sunucu kurulumu"
+  });
+}
+
+/* ============================================================
+   COMMANDS
+============================================================ */
+
+const commands = [];
+
+/* -------------------- KURULUM -------------------- */
+
+commands.push({
+  category: "Kurulum",
+  data: new SlashCommandBuilder()
+    .setName("kurulum")
+    .setDescription("Sunucuyu profesyonel Jarm sistemiyle A'dan Z'ye kurar.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+  async execute(interaction) {
+    if (!hasPerm(interaction, [PermissionFlagsBits.Administrator])) return deny(interaction, "Bu komut için yönetici yetkisi gerekli.");
+
+    await interaction.deferReply();
+
+    const guild = interaction.guild;
+    const everyone = guild.roles.everyone.id;
+
+    const required = [
+      PermissionFlagsBits.ManageRoles,
+      PermissionFlagsBits.ManageChannels,
+      PermissionFlagsBits.ManageGuild,
+      PermissionFlagsBits.SendMessages,
+      PermissionFlagsBits.ViewChannel
+    ];
+
+    for (const perm of required) {
+      if (!guild.members.me.permissions.has(perm)) {
+        return interaction.editReply({
+          embeds: [errEmbed("Kurulum için bende `Rolleri Yönet`, `Kanalları Yönet` ve temel yönetim yetkileri olmalı.")]
+        });
+      }
+    }
+
+    const roles = {};
+    roles.owner = await findOrCreateRole(guild, "👑 Jarm Owner", 0xf5c542, [PermissionFlagsBits.Administrator]);
+    roles.admin = await findOrCreateRole(guild, "🛡️ Kurmay", 0xe74c3c, [PermissionFlagsBits.Administrator]);
+    roles.mod = await findOrCreateRole(guild, "⚔️ Moderatör", 0x3498db, [
+      PermissionFlagsBits.KickMembers,
+      PermissionFlagsBits.BanMembers,
+      PermissionFlagsBits.ModerateMembers,
+      PermissionFlagsBits.ManageMessages,
+      PermissionFlagsBits.ManageNicknames
+    ]);
+    roles.support = await findOrCreateRole(guild, "🛠️ Destek Ekibi", 0x2ecc71, [PermissionFlagsBits.ManageMessages]);
+    roles.guard = await findOrCreateRole(guild, "🛡️ Guard Whitelist", 0x111827, []);
+    roles.vip = await findOrCreateRole(guild, "💎 VIP", 0xf1c40f, []);
+    roles.member = await findOrCreateRole(guild, "🌟 Üye", 0x95a5a6, []);
+    roles.male = await findOrCreateRole(guild, "♂ Erkek", 0x1f8beb, []);
+    roles.female = await findOrCreateRole(guild, "♀ Kadın", 0xff7eb9, []);
+    roles.unregistered = await findOrCreateRole(guild, "• Kayıtsız", 0x7f8c8d, []);
+    roles.l5 = await findOrCreateRole(guild, "🌱 Seviye 5", 0x2ecc71, []);
+    roles.l10 = await findOrCreateRole(guild, "🌿 Seviye 10", 0x27ae60, []);
+    roles.l25 = await findOrCreateRole(guild, "🌳 Seviye 25", 0xf39c12, []);
+    roles.l50 = await findOrCreateRole(guild, "👑 Seviye 50", 0xe74c3c, []);
+
+    const readOnly = [
+      { id: everyone, allow: [PermissionFlagsBits.ViewChannel], deny: [PermissionFlagsBits.SendMessages] }
+    ];
+
+    const publicWrite = [
+      { id: everyone, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] }
+    ];
+
+    const staffOnly = [
+      { id: everyone, deny: [PermissionFlagsBits.ViewChannel] },
+      { id: roles.admin.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+      { id: roles.mod.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+      { id: roles.support.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] }
+    ];
+
+    const catInfo = await findOrCreateCategory(guild, "📌 BİLGİLENDİRME", readOnly);
+    const catCommunity = await findOrCreateCategory(guild, "🌐 TOPLULUK", publicWrite);
+    const catRegister = await findOrCreateCategory(guild, "🚪 KAYIT", readOnly);
+    const catSupport = await findOrCreateCategory(guild, "🎫 DESTEK", readOnly);
+    const catStaff = await findOrCreateCategory(guild, "🔐 YETKİLİ", staffOnly);
+
+    const chRules = await findOrCreateTextChannel(guild, catInfo, "📋・kurallar", "Sunucu kuralları");
+    const chAnnouncements = await findOrCreateTextChannel(guild, catInfo, "📢・duyurular", "Resmi duyurular");
+    const chCounter = await findOrCreateTextChannel(guild, catInfo, "📊・sayaç", "Üye sayacı");
+    const chChat = await findOrCreateTextChannel(guild, catCommunity, "💬・sohbet", "Genel sohbet");
+    const chAi = await findOrCreateTextChannel(guild, catCommunity, "🤖・jarm-ai", "Jarm AI sohbet kanalı");
+    const chMedia = await findOrCreateTextChannel(guild, catCommunity, "🖼️・medya", "Medya paylaşımı");
+    const chGame = await findOrCreateTextChannel(guild, catCommunity, "🎮・oyun-sohbet", "Oyun sohbeti");
+    const chWelcome = await findOrCreateTextChannel(guild, catRegister, "👋・hoşgeldin", "Kayıt girişi");
+    const chRegLog = await findOrCreateTextChannel(guild, catRegister, "📝・kayıt-log", "Kayıt logları", staffOnly);
+    const chTicket = await findOrCreateTextChannel(guild, catSupport, "🎫・destek-talebi", "Ticket paneli");
+    const chTicketLog = await findOrCreateTextChannel(guild, catSupport, "📄・ticket-log", "Ticket transkript logları", staffOnly);
+    const chModLog = await findOrCreateTextChannel(guild, catStaff, "📚・mod-log", "Moderasyon logları", staffOnly);
+    const chGuardLog = await findOrCreateTextChannel(guild, catStaff, "🚨・guard-log", "Guard logları", staffOnly);
+    await findOrCreateTextChannel(guild, catStaff, "🛡️・yetkili-sohbet", "Yetkili sohbeti", staffOnly);
+
+    db.set(`ticket_staff_${guild.id}`, roles.support.id);
+    db.set(`ticket_log_${guild.id}`, chTicketLog.id);
+    db.set(`modlog_${guild.id}`, chModLog.id);
+    db.set(`welcome_${guild.id}`, chWelcome.id);
+    db.set(`welcomelog_${guild.id}`, chRegLog.id);
+    db.set(`ai_channels_${guild.id}`, [chAi.id]);
+    db.set(`otorole_${guild.id}`, {
+      member: roles.unregistered.id,
+      bot: roles.vip.id
+    });
+    db.set(`register_${guild.id}`, {
+      unregisteredRole: roles.unregistered.id,
+      maleRole: roles.male.id,
+      femaleRole: roles.female.id,
+      memberRole: roles.member.id,
+      tag: "✦",
+      logChannel: chRegLog.id
+    });
+    db.set(`automod_${guild.id}`, {
+      badword: true,
+      invite: true,
+      link: false,
+      caps: false,
+      spam: true
+    });
+    db.set(`guard_${guild.id}`, {
+      enabled: true,
+      antiNuke: true,
+      antiRaid: true,
+      antiRole: true,
+      logChannel: chGuardLog.id,
+      whitelistRoles: [roles.admin.id, roles.guard.id],
+      whitelistUsers: []
+    });
+    db.set(`levelroles_${guild.id}`, {
+      "5": roles.l5.id,
+      "10": roles.l10.id,
+      "25": roles.l25.id,
+      "50": roles.l50.id
+    });
+    db.set(`counter_${guild.id}`, {
+      channel: chCounter.id,
+      target: 500
+    });
+
+    await chRules.send({
+      embeds: [
+        jarmEmbed(CONFIG.colors.error)
+          .setTitle("📋 Sunucu Kuralları")
+          .setDescription(
+            "1. Saygı zorunludur.\n" +
+            "2. Reklam ve davet linki yasaktır.\n" +
+            "3. Spam, flood ve caps yasaktır.\n" +
+            "4. +18/NSFW içerik yasaktır.\n" +
+            "5. Yetkililere saygılı olun.\n" +
+            "6. Kanal amacı dışında kullanım yapmayın.\n" +
+            "7. Kuralları ihlal edenlere Jarm moderasyon sistemi işlem uygular."
+          )
+      ]
+    }).catch(() => {});
+
+    await chWelcome.send({
+      embeds: [
+        jarmEmbed(CONFIG.colors.success)
+          .setTitle("👋 Jarm Kayıt Kapısı")
+          .setDescription(
+            "Sunucuya hoş geldin!\n\n" +
+            "Kayıt olmak için aşağıdaki butona bas, formu doldur ve cinsiyet seçimini yap.\n" +
+            "**Oy yok, bekleme yok, anında kayıt.**"
+          )
+      ],
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("register_start")
+            .setLabel("Kayıt Ol")
+            .setEmoji("📝")
+            .setStyle(ButtonStyle.Success)
+        )
+      ]
+    }).catch(() => {});
+
+    await chTicket.send({
+      embeds: [
+        jarmEmbed(CONFIG.colors.main)
+          .setTitle("🎫 Jarm Destek Merkezi")
+          .setDescription("Destek talebi açmak için aşağıdaki menüden kategori seç.")
+      ],
+      components: [
+        new ActionRowBuilder().addComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId("ticket_select")
+            .setPlaceholder("Ticket kategorisi seç")
+            .addOptions(TICKET_CATEGORIES.map(c => ({
+              label: c.label,
+              value: c.value,
+              description: c.desc
+            })))
+        )
+      ]
+    }).catch(() => {});
+
+    await chAi.send({
+      embeds: [
+        jarmEmbed(CONFIG.colors.ai)
+          .setTitle("🤖 Jarm AI Sohbet")
+          .setDescription("Bu kanalda mesaj yazarak ya da herhangi bir kanalda **@Jarm** etiketleyerek gerçek AI sohbet motorunu kullanabilirsin.")
+      ]
+    }).catch(() => {});
+
+    await chAnnouncements.send({
+      embeds: [
+        jarmEmbed(CONFIG.colors.gold)
+          .setTitle("📢 Jarm Kurulumu Tamamlandı")
+          .setDescription("Sunucu altyapısı, kayıt, ticket, AI, guard, automod ve level sistemleri aktif edildi.")
+      ]
+    }).catch(() => {});
+
+    await interaction.editReply({
+      embeds: [
+        jarmEmbed(CONFIG.colors.success)
+          .setTitle("🏗️ Kurulum Tamamlandı")
+          .setDescription(
+            "Jarm profesyonel sunucu sistemi kuruldu.\n\n" +
+            "✅ Roller\n" +
+            "✅ Kanallar\n" +
+            "✅ Kayıt paneli\n" +
+            "✅ Ticket paneli\n" +
+            "✅ AI sohbet kanalı\n" +
+            "✅ Guard sistemi\n" +
+            "✅ Automod\n" +
+            "✅ Level sistemi"
+          )
+      ]
+    });
+  }
+});
+
+/* -------------------- TICKET COMMANDS -------------------- */
+
+commands.push({
+  category: "Ticket",
+  data: new SlashCommandBuilder()
+    .setName("ticket-setup")
+    .setDescription("Ticket paneli kurar.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addRoleOption(o => o.setName("staff").setDescription("Yetkili rolü").setRequired(true))
+    .addChannelOption(o => o.setName("log").setDescription("Ticket log kanalı").setRequired(true).addChannelTypes(ChannelType.GuildText))
+    .addChannelOption(o => o.setName("panel").setDescription("Panel kanalı").addChannelTypes(ChannelType.GuildText)),
+  async execute(interaction) {
+    if (!hasPerm(interaction, [PermissionFlagsBits.ManageGuild])) return deny(interaction, "Sunucuyu yönet yetkisi gerekli.");
+
+    const staff = interaction.options.getRole("staff");
+    const log = interaction.options.getChannel("log");
+    const panel = interaction.options.getChannel("panel") || interaction.channel;
+
+    db.set(`ticket_staff_${interaction.guild.id}`, staff.id);
+    db.set(`ticket_log_${interaction.guild.id}`, log.id);
+
+    await panel.send({
+      embeds: [
+        jarmEmbed(CONFIG.colors.main)
+          .setTitle("🎫 Jarm Destek Merkezi")
+          .setDescription("Aşağıdaki menüden ticket kategorini seç.")
+      ],
+      components: [
+        new ActionRowBuilder().addComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId("ticket_select")
+            .setPlaceholder("Kategori seç")
+            .addOptions(TICKET_CATEGORIES.map(c => ({
+              label: c.label,
+              value: c.value,
+              description: c.desc
+            })))
+        )
+      ]
+    });
+
+    await interaction.reply({
+      embeds: [okEmbed(`Ticket paneli ${panel} kanalına kuruldu.`)],
+      flags: MessageFlags.Ephemeral
+    });
+  }
+});
+
+commands.push({
+  category: "Ticket",
+  data: new SlashCommandBuilder()
+    .setName("ticket-add")
+    .setDescription("Ticket kanalına kullanıcı ekler.")
+    .addUserOption(o => o.setName("kullanici").setDescription("Eklenecek kullanıcı").setRequired(true)),
+  async execute(interaction) {
+    const meta = db.get(`ticket_${interaction.channel.id}`, null);
+    if (!meta) return deny(interaction, "Bu kanal ticket kanalı değil.");
+
+    const user = interaction.options.getUser("kullanici");
+
+    await interaction.channel.permissionOverwrites.edit(user.id, {
+      ViewChannel: true,
+      SendMessages: true,
+      ReadMessageHistory: true
+    });
+
+    if (!meta.added.includes(user.id)) meta.added.push(user.id);
+    db.set(`ticket_${interaction.channel.id}`, meta);
+
+    await interaction.reply({ embeds: [okEmbed(`${user} ticket kanalına eklendi.`)] });
+  }
+});
+
+commands.push({
+  category: "Ticket",
+  data: new SlashCommandBuilder()
+    .setName("ticket-remove")
+    .setDescription("Ticket kanalından kullanıcı çıkarır.")
+    .addUserOption(o => o.setName("kullanici").setDescription("Çıkarılacak kullanıcı").setRequired(true)),
+  async execute(interaction) {
+    const meta = db.get(`ticket_${interaction.channel.id}`, null);
+    if (!meta) return deny(interaction, "Bu kanal ticket kanalı değil.");
+
+    const user = interaction.options.getUser("kullanici");
+
+    await interaction.channel.permissionOverwrites.edit(user.id, {
+      ViewChannel: false,
+      SendMessages: false
+    });
+
+    meta.added = meta.added.filter(id => id !== user.id);
+    db.set(`ticket_${interaction.channel.id}`, meta);
+
+    await interaction.reply({ embeds: [okEmbed(`${user} ticket kanalından çıkarıldı.`)] });
+  }
+});
+
+commands.push({
+  category: "Ticket",
+  data: new SlashCommandBuilder()
+    .setName("ticket-close")
+    .setDescription("Bulunduğun ticket kanalını kapatır."),
+  async execute(interaction) {
+    const meta = db.get(`ticket_${interaction.channel.id}`, null);
+    if (!meta) return deny(interaction, "Bu kanal ticket kanalı değil.");
+    await askCloseTicket(interaction);
+  }
+});
+
+/* -------------------- REGISTER COMMANDS -------------------- */
+
+commands.push({
+  category: "Kayıt",
+  data: new SlashCommandBuilder()
+    .setName("kayit-sistem")
+    .setDescription("Kayıt sistemini ayarlar.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addRoleOption(o => o.setName("kayitsiz").setDescription("Kayıtsız rolü").setRequired(true))
+    .addRoleOption(o => o.setName("erkek").setDescription("Erkek rolü").setRequired(true))
+    .addRoleOption(o => o.setName("kadin").setDescription("Kadın rolü").setRequired(true))
+    .addRoleOption(o => o.setName("uye").setDescription("Üye rolü").setRequired(true))
+    .addChannelOption(o => o.setName("log").setDescription("Kayıt log kanalı").addChannelTypes(ChannelType.GuildText))
+    .addStringOption(o => o.setName("tag").setDescription("İsim tagı, örn: ✦").setMaxLength(5)),
+  async execute(interaction) {
+    if (!hasPerm(interaction, [PermissionFlagsBits.ManageGuild])) return deny(interaction, "Sunucuyu yönet yetkisi gerekli.");
+
+    db.set(`register_${interaction.guild.id}`, {
+      unregisteredRole: interaction.options.getRole("kayitsiz").id,
+      maleRole: interaction.options.getRole("erkek").id,
+      femaleRole: interaction.options.getRole("kadin").id,
+      memberRole: interaction.options.getRole("uye").id,
+      logChannel: interaction.options.getChannel("log")?.id || null,
+      tag: interaction.options.getString("tag") || ""
+    });
+
+    await interaction.reply({ embeds: [okEmbed("Kayıt sistemi ayarlandı.")] });
+  }
+});
+
+commands.push({
+  category: "Kayıt",
+  data: new SlashCommandBuilder()
+    .setName("kayit-panel")
+    .setDescription("Butonlu kayıt paneli gönderir.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addChannelOption(o => o.setName("kanal").setDescription("Panel kanalı").addChannelTypes(ChannelType.GuildText)),
+  async execute(interaction) {
+    if (!hasPerm(interaction, [PermissionFlagsBits.ManageGuild])) return deny(interaction, "Sunucuyu yönet yetkisi gerekli.");
+
+    const channel = interaction.options.getChannel("kanal") || interaction.channel;
+
+    await channel.send({
+      embeds: [
+        jarmEmbed(CONFIG.colors.success)
+          .setTitle("📝 Jarm Kayıt Sistemi")
+          .setDescription("Kayıt olmak için aşağıdaki butona bas ve formu doldur.")
+      ],
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("register_start")
+            .setLabel("Kayıt Ol")
+            .setEmoji("📝")
+            .setStyle(ButtonStyle.Success)
+        )
+      ]
+    });
+
+    await interaction.reply({
+      embeds: [okEmbed(`Kayıt paneli ${channel} kanalına gönderildi.`)],
+      flags: MessageFlags.Ephemeral
+    });
+  }
+});
+
+commands.push({
+  category: "Kayıt",
+  data: new SlashCommandBuilder()
+    .setName("kayit")
+    .setDescription("Yetkili manuel kayıt yapar.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageNicknames)
+    .addUserOption(o => o.setName("kullanici").setDescription("Kayıt edilecek üye").setRequired(true))
+    .addStringOption(o => o.setName("isim").setDescription("İsim").setRequired(true).setMaxLength(20))
+    .addIntegerOption(o => o.setName("yas").setDescription("Yaş").setRequired(true).setMinValue(8).setMaxValue(99))
+    .addStringOption(o => o.setName("cinsiyet").setDescription("Cinsiyet").setRequired(true).addChoices(
+      { name: "Erkek", value: "male" },
+      { name: "Kadın", value: "female" }
+    )),
+  async execute(interaction) {
+    if (!hasPerm(interaction, [PermissionFlagsBits.ManageNicknames])) return deny(interaction, "Takma adları yönet yetkisi gerekli.");
+
+    const member = await interaction.guild.members.fetch(interaction.options.getUser("kullanici").id).catch(() => null);
+    if (!member) return deny(interaction, "Üye bulunamadı.");
+
+    const data = {
+      name: interaction.options.getString("isim"),
+      age: interaction.options.getInteger("yas")
+    };
+
+    try {
+      const nick = await applyRegistration(
+        interaction.guild,
+        member,
+        data,
+        interaction.options.getString("cinsiyet"),
+        interaction.user
+      );
+
+      await interaction.reply({ embeds: [okEmbed(`${member} başarıyla kayıt edildi: \`${nick}\``)] });
+    } catch (err) {
+      await interaction.reply({ embeds: [errEmbed(err.message)] });
+    }
+  }
+});
+
+commands.push({
+  category: "Kayıt",
+  data: new SlashCommandBuilder()
+    .setName("kayit-bilgi")
+    .setDescription("Kayıt istatistiklerini gösterir."),
+  async execute(interaction) {
+    const stats = db.get(`register_stats_${interaction.guild.id}`, { total: 0, male: 0, female: 0 });
+
+    await interaction.reply({
+      embeds: [
+        jarmEmbed(CONFIG.colors.main)
+          .setTitle("📝 Kayıt İstatistikleri")
+          .addFields(
+            { name: "Toplam", value: String(stats.total), inline: true },
+            { name: "Erkek", value: String(stats.male), inline: true },
+            { name: "Kadın", value: String(stats.female), inline: true }
+          )
+      ]
+    });
+  }
+});
+
+/* -------------------- AI COMMANDS -------------------- */
+
+commands.push({
+  category: "AI",
+  data: new SlashCommandBuilder()
+    .setName("ai-sor")
+    .setDescription("Jarm AI'a soru sorar.")
+    .addStringOption(o => o.setName("soru").setDescription("Sorun").setRequired(true).setMaxLength(1000)),
+  async execute(interaction) {
+    await interaction.deferReply();
+
+    const question = interaction.options.getString("soru");
+
+    if (blockedAiPatterns.some(r => r.test(question))) {
+      return interaction.editReply({ embeds: [errEmbed("Bu konuda yardımcı olamam.")] });
+    }
+
+    addAiMemory(interaction.user.id, "user", question);
+
+    const answer = await callAi([
+      { role: "system", content: AI_SYSTEM_PROMPT },
+      ...(aiMemory.get(interaction.user.id) || [])
+    ]);
+
+    if (!answer) {
+      return interaction.editReply({
+        embeds: [errEmbed("AI motoruna ulaşılamadı. `GROQ_API_KEY` veya `OPENAI_API_KEY` kontrol et.")]
+      });
+    }
+
+    addAiMemory(interaction.user.id, "assistant", answer);
+
+    await interaction.editReply({
+      embeds: [
+        jarmEmbed(CONFIG.colors.ai)
+          .setAuthor({ name: `Jarm AI • ${interaction.user.username}`, iconURL: interaction.user.displayAvatarURL() })
+          .setDescription(cleanText(answer, 4000))
+      ]
+    });
+  }
+});
+
+commands.push({
+  category: "AI",
+  data: new SlashCommandBuilder()
+    .setName("ai-kanal")
+    .setDescription("AI sohbet kanallarını yönetir.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addStringOption(o => o.setName("islem").setDescription("İşlem").setRequired(true).addChoices(
+      { name: "ekle", value: "add" },
+      { name: "sil", value: "remove" },
+      { name: "liste", value: "list" }
+    ))
+    .addChannelOption(o => o.setName("kanal").setDescription("Kanal").addChannelTypes(ChannelType.GuildText)),
+  async execute(interaction) {
+    if (!hasPerm(interaction, [PermissionFlagsBits.ManageGuild])) return deny(interaction, "Sunucuyu yönet yetkisi gerekli.");
+
+    const action = interaction.options.getString("islem");
+    const channel = interaction.options.getChannel("kanal") || interaction.channel;
+    let list = db.get(`ai_channels_${interaction.guild.id}`, []);
+
+    if (action === "add") {
+      if (!list.includes(channel.id)) list.push(channel.id);
+      db.set(`ai_channels_${interaction.guild.id}`, list);
+      return interaction.reply({ embeds: [okEmbed(`${channel} AI kanalı olarak ayarlandı.`)] });
+    }
+
+    if (action === "remove") {
+      list = list.filter(id => id !== channel.id);
+      db.set(`ai_channels_${interaction.guild.id}`, list);
+      return interaction.reply({ embeds: [okEmbed(`${channel} AI kanal listesinden çıkarıldı.`)] });
+    }
+
+    return interaction.reply({
+      embeds: [infoEmbed(list.length ? list.map(id => `<#${id}>`).join("\n") : "AI kanalı ayarlı değil.")]
+    });
+  }
+});
+
+/* -------------------- GUARD COMMAND -------------------- */
+
+commands.push({
+  category: "Guard",
+  data: new SlashCommandBuilder()
+    .setName("guard")
+    .setDescription("Jarm guard sistemini yönetir.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addStringOption(o => o.setName("islem").setDescription("İşlem").setRequired(true).addChoices(
+      { name: "durum", value: "status" },
+      { name: "ac", value: "on" },
+      { name: "kapat", value: "off" },
+      { name: "log", value: "log" },
+      { name: "whitelist-rol-ekle", value: "roleadd" },
+      { name: "whitelist-rol-sil", value: "roleremove" }
+    ))
+    .addChannelOption(o => o.setName("kanal").setDescription("Guard log kanalı").addChannelTypes(ChannelType.GuildText))
+    .addRoleOption(o => o.setName("rol").setDescription("Whitelist rolü")),
+  async execute(interaction) {
+    if (!hasPerm(interaction, [PermissionFlagsBits.Administrator])) return deny(interaction, "Yönetici yetkisi gerekli.");
+
+    const cfg = getGuard(interaction.guild.id);
+    const action = interaction.options.getString("islem");
+
+    if (action === "on") {
+      cfg.enabled = true;
+      db.set(`guard_${interaction.guild.id}`, cfg);
+      return interaction.reply({ embeds: [okEmbed("Guard sistemi açıldı.")] });
+    }
+
+    if (action === "off") {
+      cfg.enabled = false;
+      db.set(`guard_${interaction.guild.id}`, cfg);
+      return interaction.reply({ embeds: [okEmbed("Guard sistemi kapatıldı.")] });
+    }
+
+    if (action === "log") {
+      const ch = interaction.options.getChannel("kanal");
+      if (!ch) return deny(interaction, "Log kanalı belirt.");
+      cfg.logChannel = ch.id;
+      db.set(`guard_${interaction.guild.id}`, cfg);
+      return interaction.reply({ embeds: [okEmbed(`Guard log kanalı ${ch} olarak ayarlandı.`)] });
+    }
+
+    if (action === "roleadd") {
+      const role = interaction.options.getRole("rol");
+      if (!role) return deny(interaction, "Rol belirt.");
+      if (!cfg.whitelistRoles.includes(role.id)) cfg.whitelistRoles.push(role.id);
+      db.set(`guard_${interaction.guild.id}`, cfg);
+      return interaction.reply({ embeds: [okEmbed(`${role} guard whitelist'e eklendi.`)] });
+    }
+
+    if (action === "roleremove") {
+      const role = interaction.options.getRole("rol");
+      if (!role) return deny(interaction, "Rol belirt.");
+      cfg.whitelistRoles = cfg.whitelistRoles.filter(id => id !== role.id);
+      db.set(`guard_${interaction.guild.id}`, cfg);
+      return interaction.reply({ embeds: [okEmbed(`${role} guard whitelist'ten çıkarıldı.`)] });
+    }
+
+    return interaction.reply({
+      embeds: [
+        jarmEmbed(CONFIG.colors.guard)
+          .setTitle("🛡️ Jarm Guard Durumu")
+          .addFields(
+            { name: "Aktif", value: cfg.enabled ? "✅ Açık" : "❌ Kapalı", inline: true },
+            { name: "Anti-Nuke", value: cfg.antiNuke ? "✅" : "❌", inline: true },
+            { name: "Anti-Raid", value: cfg.antiRaid ? "✅" : "❌", inline: true },
+            { name: "Sağ Tık Rol Koruma", value: cfg.antiRole ? "✅" : "❌", inline: true },
+            { name: "Log", value: cfg.logChannel ? `<#${cfg.logChannel}>` : "Yok", inline: true },
+            { name: "Whitelist Roller", value: cfg.whitelistRoles.length ? cfg.whitelistRoles.map(id => `<@&${id}>`).join("\n") : "Yok", inline: false }
+          )
+      ]
+    });
+  }
+});
+
+/* -------------------- MODERATION COMMANDS -------------------- */
+
+commands.push({
+  category: "Moderasyon",
+  data: new SlashCommandBuilder()
+    .setName("ban")
+    .setDescription("Kullanıcıyı banlar.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers)
+    .addUserOption(o => o.setName("kullanici").setDescription("Kullanıcı").setRequired(true))
+    .addStringOption(o => o.setName("sebep").setDescription("Sebep"))
+    .addIntegerOption(o => o.setName("gun").setDescription("Mesaj silme günü 0-7").setMinValue(0).setMaxValue(7)),
+  async execute(interaction) {
+    if (!hasPerm(interaction, [PermissionFlagsBits.BanMembers])) return deny(interaction, "Ban yetkin yok.");
+
+    const user = interaction.options.getUser("kullanici");
+    const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+    const reason = interaction.options.getString("sebep") || "Belirtilmedi";
+    const days = interaction.options.getInteger("gun") || 0;
+
+    if (member && !hierarchyOk(interaction, member)) return deny(interaction, "Rol hiyerarşisi nedeniyle işlem yapılamaz.");
+
+    await interaction.guild.members.ban(user.id, {
+      deleteMessageSeconds: days * 86400,
+      reason
+    });
+
+    addRecord(interaction.guild, user.id, "BAN", interaction.user, reason);
+
+    await interaction.reply({ embeds: [okEmbed(`${user.tag} banlandı.`)] });
+  }
+});
+
+commands.push({
+  category: "Moderasyon",
+  data: new SlashCommandBuilder()
+    .setName("unban")
+    .setDescription("Kullanıcının banını kaldırır.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers)
+    .addStringOption(o => o.setName("kullanici_id").setDescription("Kullanıcı ID").setRequired(true))
+    .addStringOption(o => o.setName("sebep").setDescription("Sebep")),
+  async execute(interaction) {
+    if (!hasPerm(interaction, [PermissionFlagsBits.BanMembers])) return deny(interaction, "Ban yetkin yok.");
+
+    const id = interaction.options.getString("kullanici_id");
+    const reason = interaction.options.getString("sebep") || "Belirtilmedi";
+
+    await interaction.guild.members.unban(id, reason).catch(() => null);
+
+    addRecord(interaction.guild, id, "UNBAN", interaction.user, reason);
+
+    await interaction.reply({ embeds: [okEmbed(`<@${id}> banı kaldırıldı.`)] });
+  }
+});
+
+commands.push({
+  category: "Moderasyon",
+  data: new SlashCommandBuilder()
+    .setName("kick")
+    .setDescription("Kullanıcıyı sunucudan atar.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers)
+    .addUserOption(o => o.setName("kullanici").setDescription("Kullanıcı").setRequired(true))
+    .addStringOption(o => o.setName("sebep").setDescription("Sebep")),
+  async execute(interaction) {
+    if (!hasPerm(interaction, [PermissionFlagsBits.KickMembers])) return deny(interaction, "Kick yetkin yok.");
+
+    const member = await interaction.guild.members.fetch(interaction.options.getUser("kullanici").id).catch(() => null);
+    if (!member) return deny(interaction, "Üye bulunamadı.");
+    if (!hierarchyOk(interaction, member)) return deny(interaction, "Rol hiyerarşisi nedeniyle işlem yapılamaz.");
+
+    const reason = interaction.options.getString("sebep") || "Belirtilmedi";
+
+    await member.kick(reason);
+    addRecord(interaction.guild, member.id, "KICK", interaction.user, reason);
+
+    await interaction.reply({ embeds: [okEmbed(`${member.user.tag} sunucudan atıldı.`)] });
+  }
+});
+
+commands.push({
+  category: "Moderasyon",
+  data: new SlashCommandBuilder()
+    .setName("timeout")
+    .setDescription("Kullanıcıya timeout uygular.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+    .addUserOption(o => o.setName("kullanici").setDescription("Kullanıcı").setRequired(true))
+    .addIntegerOption(o => o.setName("dakika").setDescription("Dakika").setRequired(true).setMinValue(1).setMaxValue(40320))
+    .addStringOption(o => o.setName("sebep").setDescription("Sebep")),
+  async execute(interaction) {
+    if (!hasPerm(interaction, [PermissionFlagsBits.ModerateMembers])) return deny(interaction, "Timeout yetkin yok.");
+
+    const member = await interaction.guild.members.fetch(interaction.options.getUser("kullanici").id).catch(() => null);
+    if (!member) return deny(interaction, "Üye bulunamadı.");
+    if (!hierarchyOk(interaction, member)) return deny(interaction, "Rol hiyerarşisi nedeniyle işlem yapılamaz.");
+    if (!member.moderatable) return deny(interaction, "Bu kullanıcıya timeout atamıyorum.");
+
+    const minutes = interaction.options.getInteger("dakika");
+    const reason = interaction.options.getString("sebep") || "Belirtilmedi";
+
+    await member.timeout(minutes * 60_000, reason);
+    addRecord(interaction.guild, member.id, "TIMEOUT", interaction.user, `${minutes} dakika • ${reason}`);
+
+    await interaction.reply({ embeds: [okEmbed(`${member} ${minutes} dakika susturuldu.`)] });
+  }
+});
+
+commands.push({
+  category: "Moderasyon",
+  data: new SlashCommandBuilder()
+    .setName("untimeout")
+    .setDescription("Timeout kaldırır.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+    .addUserOption(o => o.setName("kullanici").setDescription("Kullanıcı").setRequired(true)),
+  async execute(interaction) {
+    if (!hasPerm(interaction, [PermissionFlagsBits.ModerateMembers])) return deny(interaction, "Timeout yetkin yok.");
+
+    const member = await interaction.guild.members.fetch(interaction.options.getUser("kullanici").id).catch(() => null);
+    if (!member) return deny(interaction, "Üye bulunamadı.");
+
+    await member.timeout(null, "Jarm untimeout");
+
+    addRecord(interaction.guild, member.id, "UNTIMEOUT", interaction.user, "Timeout kaldırıldı");
+
+    await interaction.reply({ embeds: [okEmbed(`${member} timeout kaldırıldı.`)] });
+  }
+});
+
+commands.push({
+  category: "Moderasyon",
+  data: new SlashCommandBuilder()
+    .setName("warn")
+    .setDescription("Kullanıcıyı uyarır.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+    .addUserOption(o => o.setName("kullanici").setDescription("Kullanıcı").setRequired(true))
+    .addStringOption(o => o.setName("sebep").setDescription("Sebep").setRequired(true)),
+  async execute(interaction) {
+    if (!hasPerm(interaction, [PermissionFlagsBits.ModerateMembers])) return deny(interaction, "Moderasyon yetkin yok.");
+
+    const user = interaction.options.getUser("kullanici");
+    const reason = interaction.options.getString("sebep");
+
+    const record = addRecord(interaction.guild, user.id, "WARN", interaction.user, reason);
+
+    await interaction.reply({ embeds: [okEmbed(`${user} uyarıldı. Kayıt: #${record.id}`)] });
+  }
+});
+
+commands.push({
+  category: "Moderasyon",
+  data: new SlashCommandBuilder()
+    .setName("warnings")
+    .setDescription("Kullanıcının uyarılarını gösterir.")
+    .addUserOption(o => o.setName("kullanici").setDescription("Kullanıcı").setRequired(true)),
+  async execute(interaction) {
+    const user = interaction.options.getUser("kullanici");
+    const records = getRecords(interaction.guild.id, user.id).filter(r => r.type === "WARN");
+
+    if (!records.length) {
+      return interaction.reply({ embeds: [infoEmbed(`${user} kullanıcısının uyarısı yok.`)] });
+    }
+
+    await interaction.reply({
+      embeds: [
+        jarmEmbed(CONFIG.colors.warning)
+          .setTitle(`⚠️ ${user.tag} Uyarıları`)
+          .setDescription(records.slice(-15).map(r => `**#${r.id}** • ${cleanText(r.reason, 80)} • <t:${Math.floor(r.date / 1000)}:R>`).join("\n"))
+      ]
+    });
+  }
+});
+
+commands.push({
+  category: "Moderasyon",
+  data: new SlashCommandBuilder()
+    .setName("clearwarn")
+    .setDescription("Kullanıcının uyarılarını temizler.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+    .addUserOption(o => o.setName("kullanici").setDescription("Kullanıcı").setRequired(true)),
+  async execute(interaction) {
+    if (!hasPerm(interaction, [PermissionFlagsBits.ModerateMembers])) return deny(interaction, "Moderasyon yetkin yok.");
+
+    const user = interaction.options.getUser("kullanici");
+    const records = getRecords(interaction.guild.id, user.id).filter(r => r.type !== "WARN");
+    db.set(`records_${interaction.guild.id}_${user.id}`, records);
+
+    addRecord(interaction.guild, user.id, "CLEARWARN", interaction.user, "Uyarılar temizlendi");
+
+    await interaction.reply({ embeds: [okEmbed(`${user} uyarıları temizlendi.`)] });
+  }
+});
+
+commands.push({
+  category: "Moderasyon",
+  data: new SlashCommandBuilder()
+    .setName("sicil")
+    .setDescription("Kullanıcının ceza geçmişini gösterir.")
+    .addUserOption(o => o.setName("kullanici").setDescription("Kullanıcı").setRequired(true)),
+  async execute(interaction) {
+    const user = interaction.options.getUser("kullanici");
+    const records = getRecords(interaction.guild.id, user.id);
+
+    await interaction.reply({
+      embeds: [
+        jarmEmbed(CONFIG.colors.purple)
+          .setTitle(`📒 ${user.tag} Sicil`)
+          .setDescription(
+            records.length
+              ? records.slice(-15).reverse().map(r => `**#${r.id}** • \`${r.type}\` • ${cleanText(r.reason, 80)} • ${r.moderatorTag}`).join("\n")
+              : "Sicil temiz. ✅"
+          )
+      ]
+    });
+  }
+});
+
+commands.push({
+  category: "Moderasyon",
+  data: new SlashCommandBuilder()
+    .setName("sil")
+    .setDescription("Mesaj temizler.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+    .addIntegerOption(o => o.setName("miktar").setDescription("1-100").setRequired(true).setMinValue(1).setMaxValue(100))
+    .addBooleanOption(o => o.setName("sadece_bot").setDescription("Sadece bot mesajları")),
+  async execute(interaction) {
+    if (!hasPerm(interaction, [PermissionFlagsBits.ManageMessages])) return deny(interaction, "Mesajları yönet yetkin yok.");
+
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    const amount = interaction.options.getInteger("miktar");
+    const onlyBot = interaction.options.getBoolean("sadece_bot") || false;
+
+    const fetched = await interaction.channel.messages.fetch({ limit: amount });
+    let list = onlyBot ? fetched.filter(m => m.author.bot) : fetched;
+    list = list.filter(m => Date.now() - m.createdTimestamp < 14 * 24 * 60 * 60 * 1000);
+
+    if (!list.size) return interaction.editReply({ embeds: [errEmbed("Silinecek uygun mesaj yok.")] });
+
+    await interaction.channel.bulkDelete(list, true).catch(async () => {
+      for (const msg of list.values()) await msg.delete().catch(() => {});
+    });
+
+    await interaction.editReply({ embeds: [okEmbed(`${list.size} mesaj silindi.`)] });
+  }
+});
+
+commands.push({
+  category: "Moderasyon",
+  data: new SlashCommandBuilder()
+    .setName("kilitle")
+    .setDescription("Kanalı kilitler.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+  async execute(interaction) {
+    if (!hasPerm(interaction, [PermissionFlagsBits.ManageChannels])) return deny(interaction, "Kanal yönet yetkin yok.");
+
+    await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone.id, {
+      SendMessages: false
+    });
+
+    await interaction.reply({ embeds: [okEmbed("Kanal kilitlendi. 🔒")] });
+  }
+});
+
+commands.push({
+  category: "Moderasyon",
+  data: new SlashCommandBuilder()
+    .setName("kilit-ac")
+    .setDescription("Kanal kilidini açar.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+  async execute(interaction) {
+    if (!hasPerm(interaction, [PermissionFlagsBits.ManageChannels])) return deny(interaction, "Kanal yönet yetkin yok.");
+
+    await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone.id, {
+      SendMessages: null
+    });
+
+    await interaction.reply({ embeds: [okEmbed("Kanal kilidi açıldı. 🔓")] });
+  }
+});
+
+commands.push({
+  category: "Moderasyon",
+  data: new SlashCommandBuilder()
+    .setName("modlog")
+    .setDescription("Moderasyon log kanalını ayarlar.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addChannelOption(o => o.setName("kanal").setDescription("Log kanalı").setRequired(true).addChannelTypes(ChannelType.GuildText)),
+  async execute(interaction) {
+    if (!hasPerm(interaction, [PermissionFlagsBits.ManageGuild])) return deny(interaction, "Sunucuyu yönet yetkisi gerekli.");
+
+    const channel = interaction.options.getChannel("kanal");
+    db.set(`modlog_${interaction.guild.id}`, channel.id);
+
+    await interaction.reply({ embeds: [okEmbed(`Modlog kanalı ${channel} olarak ayarlandı.`)] });
+  }
+});
+
+/* -------------------- AUTOMOD / SYSTEM COMMANDS -------------------- */
+
+commands.push({
+  category: "Sistem",
+  data: new SlashCommandBuilder()
+    .setName("automod")
+    .setDescription("Otomatik moderasyon sistemlerini yönetir.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addStringOption(o => o.setName("sistem").setDescription("Sistem").setRequired(true).addChoices(
+      { name: "küfür", value: "badword" },
+      { name: "davet", value: "invite" },
+      { name: "link", value: "link" },
+      { name: "caps", value: "caps" },
+      { name: "spam", value: "spam" }
+    ))
+    .addBooleanOption(o => o.setName("durum").setDescription("Aç/Kapat").setRequired(true))
+    .addStringOption(o => o.setName("kelime").setDescription("Küfür filtresine özel kelime ekle")),
+  async execute(interaction) {
+    if (!hasPerm(interaction, [PermissionFlagsBits.ManageGuild])) return deny(interaction, "Sunucuyu yönet yetkisi gerekli.");
+
+    const system = interaction.options.getString("sistem");
+    const status = interaction.options.getBoolean("durum");
+    const word = interaction.options.getString("kelime");
+
+    const settings = db.get(`automod_${interaction.guild.id}`, {
+      badword: false,
+      invite: true,
+      link: false,
+      caps: false,
+      spam: true
+    });
+
+    settings[system] = status;
+    db.set(`automod_${interaction.guild.id}`, settings);
+
+    if (word) {
+      const list = db.get(`badwords_${interaction.guild.id}`, defaultBadWords);
+      if (!list.includes(word.toLowerCase())) list.push(word.toLowerCase());
+      db.set(`badwords_${interaction.guild.id}`, list);
+    }
+
+    await interaction.reply({
+      embeds: [okEmbed(`Automod sistemi güncellendi: \`${system}\` = ${status ? "Açık" : "Kapalı"}${word ? `\nKelime eklendi: \`${word}\`` : ""}`)]
+    });
+  }
+});
+
+commands.push({
+  category: "Sistem",
+  data: new SlashCommandBuilder()
+    .setName("otorol")
+    .setDescription("Otomatik rol sistemini ayarlar.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addRoleOption(o => o.setName("uye_rol").setDescription("Yeni üye rolü"))
+    .addRoleOption(o => o.setName("bot_rol").setDescription("Bot rolü"))
+    .addBooleanOption(o => o.setName("kapat").setDescription("Sistemi kapat")),
+  async execute(interaction) {
+    if (!hasPerm(interaction, [PermissionFlagsBits.ManageGuild])) return deny(interaction, "Sunucuyu yönet yetkisi gerekli.");
+
+    if (interaction.options.getBoolean("kapat")) {
+      db.delete(`otorole_${interaction.guild.id}`);
+      return interaction.reply({ embeds: [okEmbed("Otorol sistemi kapatıldı.")] });
+    }
+
+    const memberRole = interaction.options.getRole("uye_rol");
+    const botRole = interaction.options.getRole("bot_rol");
+
+    db.set(`otorole_${interaction.guild.id}`, {
+      member: memberRole?.id || null,
+      bot: botRole?.id || null
+    });
+
+    await interaction.reply({ embeds: [okEmbed("Otorol sistemi ayarlandı.")] });
+  }
+});
+
+commands.push({
+  category: "Sistem",
+  data: new SlashCommandBuilder()
+    .setName("welcome")
+    .setDescription("Karşılama ve giriş/çıkış log kanallarını ayarlar.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addChannelOption(o => o.setName("kanal").setDescription("Karşılama kanalı").addChannelTypes(ChannelType.GuildText))
+    .addChannelOption(o => o.setName("log").setDescription("Giriş/çıkış log kanalı").addChannelTypes(ChannelType.GuildText)),
+  async execute(interaction) {
+    if (!hasPerm(interaction, [PermissionFlagsBits.ManageGuild])) return deny(interaction, "Sunucuyu yönet yetkisi gerekli.");
+
+    const channel = interaction.options.getChannel("kanal");
+    const log = interaction.options.getChannel("log");
+
+    if (channel) db.set(`welcome_${interaction.guild.id}`, channel.id);
+    if (log) db.set(`welcomelog_${interaction.guild.id}`, log.id);
+
+    await interaction.reply({ embeds: [okEmbed("Welcome sistemi güncellendi.")] });
+  }
+});
+
+commands.push({
+  category: "Sistem",
+  data: new SlashCommandBuilder()
+    .setName("sayac")
+    .setDescription("Sayaç sistemini ayarlar.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addChannelOption(o => o.setName("kanal").setDescription("Sayaç kanalı").addChannelTypes(ChannelType.GuildText))
+    .addIntegerOption(o => o.setName("hedef").setDescription("Hedef üye sayısı").setMinValue(1))
+    .addBooleanOption(o => o.setName("kapat").setDescription("Sayaç kapat")),
+  async execute(interaction) {
+    if (!hasPerm(interaction, [PermissionFlagsBits.ManageGuild])) return deny(interaction, "Sunucuyu yönet yetkisi gerekli.");
+
+    if (interaction.options.getBoolean("kapat")) {
+      db.delete(`counter_${interaction.guild.id}`);
+      return interaction.reply({ embeds: [okEmbed("Sayaç kapatıldı.")] });
+    }
+
+    const channel = interaction.options.getChannel("kanal");
+    const target = interaction.options.getInteger("hedef");
+
+    if (!channel || !target) {
+      const cfg = db.get(`counter_${interaction.guild.id}`, null);
+      if (!cfg) return interaction.reply({ embeds: [infoEmbed("Sayaç sistemi ayarlı değil.")] });
+      return interaction.reply({
+        embeds: [infoEmbed(`Sayaç hedefi: **${cfg.target}** | Kalan: **${Math.max(0, cfg.target - interaction.guild.memberCount)}** | Kanal: <#${cfg.channel}>`)]
+      });
+    }
+
+    db.set(`counter_${interaction.guild.id}`, {
+      channel: channel.id,
+      target
+    });
+
+    await interaction.reply({ embeds: [okEmbed(`Sayaç ayarlandı: ${channel} • hedef ${target}`)] });
+  }
+});
+
+/* -------------------- LEVEL COMMANDS -------------------- */
+
+commands.push({
+  category: "Level",
+  data: new SlashCommandBuilder()
+    .setName("level")
+    .setDescription("Seviye kartını gösterir.")
+    .addUserOption(o => o.setName("kullanici").setDescription("Kullanıcı")),
+  async execute(interaction) {
+    const user = interaction.options.getUser("kullanici") || interaction.user;
+    const data = getXp(interaction.guild.id, user.id);
+
+    const currentLevelXp = xpForLevel(data.level);
+    const nextLevelXp = xpForLevel(data.level + 1);
+    const progress = data.xp - currentLevelXp;
+    const needed = nextLevelXp - currentLevelXp;
+
+    await interaction.reply({
+      embeds: [
+        jarmEmbed(CONFIG.colors.gold)
+          .setAuthor({ name: `${user.username} • Seviye Kartı`, iconURL: user.displayAvatarURL() })
+          .setThumbnail(user.displayAvatarURL({ size: 512 }))
+          .addFields(
+            { name: "Seviye", value: String(data.level), inline: true },
+            { name: "XP", value: String(data.xp), inline: true },
+            { name: "Mesaj", value: String(data.messages), inline: true },
+            { name: "İlerleme", value: `${progressBar(progress, needed)} ${Math.round((progress / needed) * 100)}%`, inline: false }
+          )
+      ]
+    });
+  }
+});
+
+commands.push({
+  category: "Level",
+  data: new SlashCommandBuilder()
+    .setName("liderlik")
+    .setDescription("Sunucu seviye liderliğini gösterir."),
+  async execute(interaction) {
+    const rows = db.startsWith(`xp_${interaction.guild.id}_`)
+      .map(([key, value]) => ({
+        userId: key.split("_")[2],
+        ...value
+      }))
+      .sort((a, b) => b.xp - a.xp)
+      .slice(0, 10);
+
+    if (!rows.length) return interaction.reply({ embeds: [infoEmbed("Henüz seviye verisi yok.")] });
+
+    await interaction.reply({
+      embeds: [
+        jarmEmbed(CONFIG.colors.gold)
+          .setTitle("🏆 Seviye Liderliği")
+          .setDescription(rows.map((r, i) => `**${i + 1}.** <@${r.userId}> • Level **${r.level}** • **${r.xp} XP**`).join("\n"))
+      ]
+    });
+  }
+});
+
+commands.push({
+  category: "Level",
+  data: new SlashCommandBuilder()
+    .setName("level-rol")
+    .setDescription("Seviye ödül rolü ayarlar.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
+    .addIntegerOption(o => o.setName("seviye").setDescription("Seviye").setRequired(true).setMinValue(1))
+    .addRoleOption(o => o.setName("rol").setDescription("Rol, boş bırakırsan siler")),
+  async execute(interaction) {
+    if (!hasPerm(interaction, [PermissionFlagsBits.ManageRoles])) return deny(interaction, "Rolleri yönet yetkisi gerekli.");
+
+    const level = interaction.options.getInteger("seviye");
+    const role = interaction.options.getRole("rol");
+    const roles = db.get(`levelroles_${interaction.guild.id}`, {});
+
+    if (role) roles[String(level)] = role.id;
+    else delete roles[String(level)];
+
+    db.set(`levelroles_${interaction.guild.id}`, roles);
+
+    await interaction.reply({
+      embeds: [okEmbed(role ? `Level ${level} ödül rolü ${role} oldu.` : `Level ${level} ödül rolü silindi.`)]
+    });
+  }
+});
+
+/* -------------------- EXTRA COMMANDS -------------------- */
+
+commands.push({
+  category: "Genel",
+  data: new SlashCommandBuilder().setName("yardim").setDescription("Komut listesini gösterir."),
+  async execute(interaction) {
+    const groups = {};
+    for (const cmd of client.commands.values()) {
+      if (!groups[cmd.category]) groups[cmd.category] = [];
+      groups[cmd.category].push(`\`/${cmd.data.name}\``);
+    }
+
+    const emb = jarmEmbed(CONFIG.colors.main)
+      .setTitle("📚 Jarm Yardım Menüsü")
+      .setDescription(`Toplam **${client.commands.size}** slash komut aktif.`);
+
+    for (const [cat, list] of Object.entries(groups)) {
+      emb.addFields({ name: `▸ ${cat}`, value: list.join(" "), inline: false });
+    }
+
+    await interaction.reply({ embeds: [emb] });
+  }
+});
+
+commands.push({
+  category: "Genel",
+  data: new SlashCommandBuilder().setName("ping").setDescription("Bot gecikmesini gösterir."),
+  async execute(interaction) {
+    await interaction.reply({
+      embeds: [
+        jarmEmbed(CONFIG.colors.ai)
+          .setTitle("🏓 Pong!")
+          .setDescription(`WebSocket ping: **${client.ws.ping}ms**`)
+      ]
+    });
+  }
+});
+
+commands.push({
+  category: "Genel",
+  data: new SlashCommandBuilder().setName("hakkinda").setDescription("Jarm hakkında bilgi verir."),
+  async execute(interaction) {
+    const uptime = Math.floor(process.uptime());
+    const d = Math.floor(uptime / 86400);
+    const h = Math.floor((uptime % 86400) / 3600);
+    const m = Math.floor((uptime % 3600) / 60);
+
+    await interaction.reply({
+      embeds: [
+        jarmEmbed(CONFIG.colors.main)
+          .setTitle("🛡️ Jarm Bot Hakkında")
+          .setDescription(
+            "**Jarm**, 217i tarafından geliştirilen gelişmiş Discord yönetim botudur.\n\n" +
+            "Ticket, kayıt, moderasyon, guard, AI sohbet, level, automod ve yardımcı sistemleri tek çatı altında sunar."
+          )
+          .addFields(
+            { name: "Developer", value: "217i", inline: true },
+            { name: "Studio", value: "JXRM Studio", inline: true },
+            { name: "Altyapı", value: "Discord.js v14 • Node.js • Express", inline: false },
+            { name: "Uptime", value: `${d}g ${h}s ${m}d`, inline: true },
+            { name: "Sunucu", value: String(client.guilds.cache.size), inline: true },
+            { name: "Komut", value: String(client.commands.size), inline: true }
+          )
+      ]
+    });
+  }
+});
+
+commands.push({
+  category: "Genel",
+  data: new SlashCommandBuilder().setName("sunucu-bilgi").setDescription("Sunucu bilgilerini gösterir."),
+  async execute(interaction) {
+    const guild = interaction.guild;
+    const owner = await guild.fetchOwner().catch(() => null);
+
+    await interaction.reply({
+      embeds: [
+        jarmEmbed(CONFIG.colors.gold)
+          .setTitle(`🏰 ${guild.name}`)
+          .setThumbnail(guild.iconURL({ size: 512 }) || client.user.displayAvatarURL())
+          .addFields(
+            { name: "Sahip", value: owner ? `${owner}` : "Bilinmiyor", inline: true },
+            { name: "Üye", value: String(guild.memberCount), inline: true },
+            { name: "Kanal", value: String(guild.channels.cache.size), inline: true },
+            { name: "Rol", value: String(guild.roles.cache.size), inline: true },
+            { name: "Emoji", value: String(guild.emojis.cache.size), inline: true },
+            { name: "Boost", value: `${guild.premiumSubscriptionCount || 0}`, inline: true },
+            { name: "Kuruluş", value: `<t:${Math.floor(guild.createdTimestamp / 1000)}:F>`, inline: false }
+          )
+      ]
+    });
+  }
+});
+
+commands.push({
+  category: "Genel",
+  data: new SlashCommandBuilder()
+    .setName("kullanici-bilgi")
+    .setDescription("Kullanıcı bilgilerini gösterir.")
+    .addUserOption(o => o.setName("kullanici").setDescription("Kullanıcı")),
+  async execute(interaction) {
+    const member = interaction.options.getMember("kullanici") || interaction.member;
+    const user = member.user;
+    const roles = member.roles.cache
+      .filter(r => r.id !== interaction.guild.id)
+      .sort((a, b) => b.position - a.position)
+      .map(r => `${r}`)
+      .slice(0, 15)
+      .join(" ") || "Yok";
+
+    await interaction.reply({
+      embeds: [
+        jarmEmbed(CONFIG.colors.purple)
+          .setAuthor({ name: user.tag, iconURL: user.displayAvatarURL() })
+          .setThumbnail(user.displayAvatarURL({ size: 512 }))
+          .addFields(
+            { name: "ID", value: `\`${user.id}\``, inline: true },
+            { name: "Bot", value: user.bot ? "Evet" : "Hayır", inline: true },
+            { name: "Hesap", value: `<t:${Math.floor(user.createdTimestamp / 1000)}:R>`, inline: true },
+            { name: "Katılım", value: member.joinedTimestamp ? `<t:${Math.floor(member.joinedTimestamp / 1000)}:R>` : "Bilinmiyor", inline: true },
+            { name: "Roller", value: roles, inline: false }
+          )
+      ]
+    });
+  }
+});
+
+commands.push({
+  category: "Genel",
+  data: new SlashCommandBuilder()
+    .setName("avatar")
+    .setDescription("Kullanıcı avatarını gösterir.")
+    .addUserOption(o => o.setName("kullanici").setDescription("Kullanıcı")),
+  async execute(interaction) {
+    const user = interaction.options.getUser("kullanici") || interaction.user;
+    const url = user.displayAvatarURL({ size: 1024 });
+
+    await interaction.reply({
+      embeds: [baseEmbed(CONFIG.colors.main).setTitle(`🖼️ ${user.username} Avatar`).setImage(url)],
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setLabel("Avatarı Aç").setURL(url).setStyle(ButtonStyle.Link)
+        )
+      ]
+    });
+  }
+});
+
+commands.push({
+  category: "Genel",
+  data: new SlashCommandBuilder()
+    .setName("banner")
+    .setDescription("Kullanıcı bannerını gösterir.")
+    .addUserOption(o => o.setName("kullanici").setDescription("Kullanıcı")),
+  async execute(interaction) {
+    const user = await client.users.fetch(interaction.options.getUser("kullanici")?.id || interaction.user.id, { force: true });
+    const url = user.bannerURL({ size: 1024 });
+
+    if (!url) {
+      return interaction.reply({
+        embeds: [infoEmbed("Bu kullanıcının bannerı yok.")],
+        flags: MessageFlags.Ephemeral
+      });
+    }
+
+    await interaction.reply({
+      embeds: [baseEmbed(CONFIG.colors.purple).setTitle(`🎇 ${user.username} Banner`).setImage(url)]
+    });
+  }
+});
+
+commands.push({
+  category: "Genel",
+  data: new SlashCommandBuilder()
+    .setName("embed-yaz")
+    .setDescription("Modal ile özel embed oluşturur.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+    .addChannelOption(o => o.setName("kanal").setDescription("Hedef kanal").addChannelTypes(ChannelType.GuildText)),
+  async execute(interaction) {
+    if (!hasPerm(interaction, [PermissionFlagsBits.ManageMessages])) return deny(interaction, "Mesajları yönet yetkisi gerekli.");
+
+    const channel = interaction.options.getChannel("kanal") || interaction.channel;
+
+    const modal = new ModalBuilder()
+      .setCustomId(`embed_modal:${channel.id}`)
+      .setTitle("Jarm Embed Oluşturucu");
+
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId("title").setLabel("Başlık").setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(256)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId("desc").setLabel("Açıklama").setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(4000)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId("color").setLabel("Renk HEX, örn: #f5c542").setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(7)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId("button").setLabel("Buton: Etiket | https://link").setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(300)
+      )
+    );
+
+    await interaction.showModal(modal);
+  }
+});
+
+commands.push({
+  category: "Eğlence",
+  data: new SlashCommandBuilder().setName("yazitura").setDescription("Yazı tura atar."),
+  async execute(interaction) {
+    await interaction.reply({
+      embeds: [
+        jarmEmbed(CONFIG.colors.gold)
+          .setTitle("🪙 Yazı Tura")
+          .setDescription(`Sonuç: **${Math.random() < 0.5 ? "YAZI" : "TURA"}**`)
+      ]
+    });
+  }
+});
+
+commands.push({
+  category: "Eğlence",
+  data: new SlashCommandBuilder()
+    .setName("zar")
+    .setDescription("Zar atar.")
+    .addIntegerOption(o => o.setName("yuz").setDescription("Zar yüzü").setMinValue(2).setMaxValue(1000)),
+  async execute(interaction) {
+    const sides = interaction.options.getInteger("yuz") || 6;
+    await interaction.reply({
+      embeds: [
+        jarmEmbed(CONFIG.colors.main)
+          .setTitle("🎲 Zar")
+          .setDescription(`d${sides} sonucu: **${randomInt(1, sides)}**`)
+      ]
+    });
+  }
+});
+
+commands.push({
+  category: "Eğlence",
+  data: new SlashCommandBuilder()
+    .setName("8ball")
+    .setDescription("Sihirli küreye soru sorar.")
+    .addStringOption(o => o.setName("soru").setDescription("Sorun").setRequired(true)),
+  async execute(interaction) {
+    const answers = [
+      "Kesinlikle evet.",
+      "Bence hayır kral.",
+      "Zaman gösterecek.",
+      "Şansın yüksek.",
+      "Buna evren bile şaşırdı.",
+      "Olabilir ama dikkatli ol.",
+      "Net değil, tekrar dene.",
+      "Jarm buna evet diyor."
+    ];
+
+    await interaction.reply({
+      embeds: [
+        jarmEmbed(CONFIG.colors.purple)
+          .setTitle("🎱 8Ball")
+          .setDescription(`**Soru:** ${cleanText(interaction.options.getString("soru"), 500)}\n**Cevap:** ${answers[Math.floor(Math.random() * answers.length)]}`)
+      ]
+    });
+  }
+});
+
+commands.push({
+  category: "Eğlence",
+  data: new SlashCommandBuilder()
+    .setName("ship")
+    .setDescription("İki kullanıcıyı shipler.")
+    .addUserOption(o => o.setName("kisi1").setDescription("1. kişi").setRequired(true))
+    .addUserOption(o => o.setName("kisi2").setDescription("2. kişi").setRequired(true)),
+  async execute(interaction) {
+    const a = interaction.options.getUser("kisi1");
+    const b = interaction.options.getUser("kisi2");
+    const hash = crypto.createHash("md5").update(a.id + b.id).digest();
+    const percent = hash.readUInt16BE(0) % 101;
+
+    await interaction.reply({
+      embeds: [
+        jarmEmbed(CONFIG.colors.pink)
+          .setTitle("💘 Ship Metre")
+          .setDescription(`${a} ❤️ ${b}\n${progressBar(percent, 100)} **%${percent}** uyum!`)
+      ]
+    });
+  }
+});
+
+commands.push({
+  category: "Araçlar",
+  data: new SlashCommandBuilder()
+    .setName("matematik")
+    .setDescription("Güvenli matematik hesabı yapar.")
+    .addStringOption(o => o.setName("islem").setDescription("Örn: (5+3)*2").setRequired(true)),
+  async execute(interaction) {
+    try {
+      const expr = interaction.options.getString("islem");
+      const result = calcExpression(expr);
+
+      await interaction.reply({
+        embeds: [
+          jarmEmbed(CONFIG.colors.ai)
+            .setTitle("🧮 Matematik")
+            .setDescription(`\`${expr} = ${result}\``)
+        ]
+      });
+    } catch {
+      await interaction.reply({ embeds: [errEmbed("Geçersiz matematik ifadesi.")] });
+    }
+  }
+});
+
+commands.push({
+  category: "Araçlar",
+  data: new SlashCommandBuilder()
+    .setName("sifre")
+    .setDescription("Güçlü şifre üretir.")
+    .addIntegerOption(o => o.setName("uzunluk").setDescription("8-64").setMinValue(8).setMaxValue(64)),
+  async execute(interaction) {
+    const length = interaction.options.getInteger("uzunluk") || 16;
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*";
+    const bytes = crypto.randomBytes(length);
+    let out = "";
+    for (let i = 0; i < length; i++) out += chars[bytes[i] % chars.length];
+
+    await interaction.reply({
+      embeds: [jarmEmbed(CONFIG.colors.green).setTitle("🔐 Güçlü Şifre").setDescription(`\`${out}\``)],
+      flags: MessageFlags.Ephemeral
+    });
+  }
+});
+
+commands.push({
+  category: "Araçlar",
+  data: new SlashCommandBuilder()
+    .setName("renk")
+    .setDescription("Rastgele renk üretir."),
+  async execute(interaction) {
+    const hex = crypto.randomBytes(3).toString("hex").toUpperCase();
+
+    await interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(parseInt(hex, 16))
+          .setTitle("🎨 Rastgele Renk")
+          .setDescription(`#${hex}`)
+          .setThumbnail(`https://singlecolorimage.com/get/${hex}/256x256`)
+      ]
+    });
+  }
+});
+
+commands.push({
+  category: "Araçlar",
+  data: new SlashCommandBuilder()
+    .setName("hatirlat")
+    .setDescription("Hatırlatıcı kurar.")
+    .addIntegerOption(o => o.setName("dakika").setDescription("Dakika").setRequired(true).setMinValue(1).setMaxValue(10080))
+    .addStringOption(o => o.setName("metin").setDescription("Hatırlatma metni").setRequired(true).setMaxLength(500)),
+  async execute(interaction) {
+    const minutes = interaction.options.getInteger("dakika");
+    const text = interaction.options.getString("metin");
+
+    const list = db.get("reminders", []);
+    list.push({
+      userId: interaction.user.id,
+      time: Date.now() + minutes * 60_000,
+      text
+    });
+    db.set("reminders", list);
+
+    await interaction.reply({
+      embeds: [okEmbed(`${minutes} dakika sonra hatırlatacağım: \`${cleanText(text, 200)}\``)],
+      flags: MessageFlags.Ephemeral
+    });
+  }
+});
+
+commands.push({
+  category: "Araçlar",
+  data: new SlashCommandBuilder()
+    .setName("afk")
+    .setDescription("AFK moduna geçersin.")
+    .addStringOption(o => o.setName("sebep").setDescription("Sebep").setMaxLength(200)),
+  async execute(interaction) {
+    const reason = interaction.options.getString("sebep") || "Belirtilmedi";
+    db.set(`afk_${interaction.guild.id}_${interaction.user.id}`, {
+      reason,
+      since: Date.now()
+    });
+
+    await interaction.reply({ embeds: [okEmbed(`AFK oldun: \`${cleanText(reason, 200)}\``)] });
+  }
+});
+
+const snipes = new Map();
+
+commands.push({
+  category: "Araçlar",
+  data: new SlashCommandBuilder()
+    .setName("snipe")
+    .setDescription("Kanalda silinen son mesajı gösterir."),
+  async execute(interaction) {
+    const data = snipes.get(interaction.channel.id);
+    if (!data) return interaction.reply({ embeds: [infoEmbed("Bu kanalda silinen mesaj bulunamadı.")] });
+
+    await interaction.reply({
+      embeds: [
+        jarmEmbed(CONFIG.colors.purple)
+          .setTitle("🕵️ Snipe")
+          .setDescription(`**${data.author}:** ${cleanText(data.content || "İçerik yok", 1000)}`)
+          .setFooter({ text: new Date(data.time).toLocaleString("tr-TR") })
+      ]
+    });
+  }
+});
+
+commands.push({
+  category: "Araçlar",
+  data: new SlashCommandBuilder()
+    .setName("profil")
+    .setDescription("Detaylı profil kartı gösterir.")
+    .addUserOption(o => o.setName("kullanici").setDescription("Kullanıcı")),
+  async execute(interaction) {
+    const member = interaction.options.getMember("kullanici") || interaction.member;
+    const user = member.user;
+    const xp = getXp(interaction.guild.id, user.id);
+    const records = getRecords(interaction.guild.id, user.id);
+    const warnings = records.filter(r => r.type === "WARN").length;
+
+    const badges = [];
+    if (user.bot) badges.push("🤖 Bot");
+    if (CONFIG.owners.includes(user.id)) badges.push("👑 Developer");
+    if (warnings === 0) badges.push("😇 Temiz Sicil");
+    if (xp.level >= 10) badges.push("🏆 Level 10+");
+    if (xp.level >= 25) badges.push("💎 Level 25+");
+
+    await interaction.reply({
+      embeds: [
+        jarmEmbed(CONFIG.colors.purple)
+          .setAuthor({ name: `${user.username} Profil Kartı`, iconURL: user.displayAvatarURL() })
+          .setThumbnail(user.displayAvatarURL({ size: 512 }))
+          .addFields(
+            { name: "ID", value: `\`${user.id}\``, inline: true },
+            { name: "Level", value: String(xp.level), inline: true },
+            { name: "XP", value: String(xp.xp), inline: true },
+            { name: "Uyarı", value: String(warnings), inline: true },
+            { name: "Hesap", value: `<t:${Math.floor(user.createdTimestamp / 1000)}:R>`, inline: true },
+            { name: "Katılım", value: member.joinedTimestamp ? `<t:${Math.floor(member.joinedTimestamp / 1000)}:R>` : "-", inline: true },
+            { name: "Rozetler", value: badges.join(" • ") || "Yok", inline: false }
+          )
+      ]
+    });
+  }
+});
+
+/* ============================================================
+   COMMAND REGISTER COLLECTION
+============================================================ */
+
+for (const cmd of commands) {
+  client.commands.set(cmd.data.name, cmd);
+}
+
+/* ============================================================
+   INTERACTION HANDLER
+============================================================ */
+
+client.on("interactionCreate", async interaction => {
+  try {
+    if (interaction.isChatInputCommand()) {
+      const cmd = client.commands.get(interaction.commandName);
+      if (!cmd) return;
+      await cmd.execute(interaction);
       return;
     }
-  }
-  /* LEVEL */
-  await giveXp(client, message);
-});
 
-/* ============================ SNIPER ============================ */
-client.on('messageDelete', (m) => { if (m.guild && !m.author?.bot) snipes.set(m.channel.id, { tag: m.author.tag, content: (m.content || '').slice(0, 1000), t: Date.now() }); });
-
-/* ============================ MEMBER ADD (KAYIT GATE + WELCOME + RAID) ============================ */
-client.on('guildMemberAdd', async (member) => {
-  const g = member.guild;
-  try {
-    const roles = db.get(`otorol_${g.id}`, null);
-    if (roles) { const rid = member.user.bot ? roles.bot : roles.member; if (rid && g.roles.cache.has(rid)) await member.roles.add(rid).catch(() => {}); }
-    /* RAID */
-    const cfg = guardCfg(g);
-    if (cfg.enabled.raid) {
-      const arr = (joinTracker.get(g.id) || []).filter(t => Date.now() - t < 10000); arr.push(Date.now()); joinTracker.set(g.id, arr);
-      if (arr.length >= 8) { const ch = cfg.log && g.channels.cache.has(cfg.log) ? g.channels.cache.get(cfg.log) : null; if (ch) ch.send({ embeds: [base(config.colors.guard).setTitle('🚨 RAID ŞÜPHESİ').setDescription(`10sn içinde ${arr.length} giriş! Yeni üyelere otomatik timeout.`)] }).catch(() => {}); db.set(`raidmode_${g.id}`, Date.now() + 300000); }
-      if ((db.get(`raidmode_${g.id}`, 0) || 0) > Date.now()) await member.timeout(600000, 'Raid koruması').catch(() => {});
+    if (interaction.isStringSelectMenu()) {
+      if (interaction.customId === "ticket_select") {
+        await showTicketModal(interaction, interaction.values[0]);
+        return;
+      }
     }
-    const sayac = db.get(`sayac_${g.id}`, null);
-    if (sayac && g.channels.cache.has(sayac.channel)) g.channels.cache.get(sayac.channel).send({ embeds: [base(config.colors.success).setDescription(`🎉 **${member.user.tag}** katıldı! **${g.memberCount}/${sayac.target}** üye.`)] }).catch(() => {});
-    const w = db.get(`welcome_${g.id}`, null);
-    if (w && g.channels.cache.has(w)) g.channels.cache.get(w).send({ embeds: [jEmbed(client, config.colors.success).setTitle('👋 HOŞ GELDİN').setDescription(`${member} aramıza katıldı! (${g.memberCount}. üye)\n📅 Hesap: <t:${Math.floor(member.user.createdTimestamp / 1000)}:R>`), components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('reg_start').setLabel('📝 Kayıt Ol').setStyle(ButtonStyle.Success))] }).catch(() => {});
-    const l = db.get(`welcomelog_${g.id}`, null);
-    if (l && g.channels.cache.has(l)) g.channels.cache.get(l).send({ embeds: [base().setTitle('➡️ Giriş').setDescription(`${member} (\`${member.id}\`)`)] }).catch(() => {});
-  } catch (e) { console.error('[ADD]', e.message); }
-});
-client.on('guildMemberRemove', async (member) => {
-  const g = member.guild;
-  const l = db.get(`welcomelog_${g.id}`, null);
-  if (l && g.channels.cache.has(l)) g.channels.cache.get(l).send({ embeds: [base(config.colors.error).setTitle('⬅️ Çıkış').setDescription(`${member.user.tag} (\`${member.id}\`)`)] }).catch(() => {});
-  db.delete(`regpending_${g.id}_${member.id}`);
+
+    if (interaction.isModalSubmit()) {
+      if (interaction.customId.startsWith("ticket_modal:")) {
+        await createTicket(interaction);
+        return;
+      }
+
+      if (interaction.customId === "register_modal") {
+        const name = interaction.fields.getTextInputValue("name").trim();
+        const ageRaw = interaction.fields.getTextInputValue("age").trim();
+        const age = Number(ageRaw);
+
+        if (!name || !Number.isInteger(age) || age < 8 || age > 99) {
+          return interaction.reply({
+            embeds: [errEmbed("İsim veya yaş geçersiz. Yaş 8-99 arasında olmalı.")],
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        db.set(`register_pending_${interaction.guild.id}_${interaction.user.id}`, {
+          name,
+          age
+        });
+
+        await interaction.reply({
+          embeds: [
+            jarmEmbed(CONFIG.colors.success)
+              .setTitle("📝 Kayıt Formu Alındı")
+              .setDescription(`İsim: \`${name}\`\nYaş: \`${age}\`\n\nŞimdi cinsiyet seçimini yap.`)
+          ],
+          components: [
+            new ActionRowBuilder().addComponents(
+              new ButtonBuilder().setCustomId("register_male").setLabel("Erkek").setEmoji("♂").setStyle(ButtonStyle.Primary),
+              new ButtonBuilder().setCustomId("register_female").setLabel("Kadın").setEmoji("♀").setStyle(ButtonStyle.Secondary)
+            )
+          ],
+          flags: MessageFlags.Ephemeral
+        });
+        return;
+      }
+
+      if (interaction.customId.startsWith("embed_modal:")) {
+        const channelId = interaction.customId.split(":")[1];
+        const channel = interaction.guild.channels.cache.get(channelId) || interaction.channel;
+
+        const title = interaction.fields.getTextInputValue("title");
+        const desc = interaction.fields.getTextInputValue("desc");
+        const colorRaw = interaction.fields.getTextInputValue("color");
+        const buttonRaw = interaction.fields.getTextInputValue("button");
+
+        let color = CONFIG.colors.main;
+        const match = String(colorRaw || "").match(/^#?([0-9a-f]{6})$/i);
+        if (match) color = parseInt(match[1], 16);
+
+        const emb = baseEmbed(color);
+        if (title) emb.setTitle(cleanText(title, 256));
+        if (desc) emb.setDescription(cleanText(desc, 4000));
+        emb.setFooter({ text: `${interaction.user.username} tarafından gönderildi`, iconURL: interaction.user.displayAvatarURL() });
+
+        const components = [];
+        if (buttonRaw && buttonRaw.includes("|")) {
+          const [label, url] = buttonRaw.split("|").map(x => x.trim());
+          if (label && /^https?:\/\//i.test(url || "")) {
+            components.push(
+              new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setLabel(label.slice(0, 80)).setURL(url).setStyle(ButtonStyle.Link)
+              )
+            );
+          }
+        }
+
+        await channel.send({ embeds: [emb], components });
+        await interaction.reply({
+          embeds: [okEmbed(`Embed ${channel} kanalına gönderildi.`)],
+          flags: MessageFlags.Ephemeral
+        });
+        return;
+      }
+    }
+
+    if (interaction.isButton()) {
+      if (interaction.customId === "ticket_close") return askCloseTicket(interaction);
+      if (interaction.customId === "ticket_close_yes") return closeTicket(interaction, true);
+      if (interaction.customId === "ticket_close_no") return closeTicket(interaction, false);
+      if (interaction.customId === "ticket_lock") return lockTicket(interaction, true);
+      if (interaction.customId === "ticket_unlock") return lockTicket(interaction, false);
+      if (interaction.customId === "ticket_transcript") return sendTicketTranscript(interaction);
+
+      if (interaction.customId === "register_start") {
+        await interaction.showModal(registrationModal());
+        return;
+      }
+
+      if (interaction.customId === "register_male" || interaction.customId === "register_female") {
+        const data = db.get(`register_pending_${interaction.guild.id}_${interaction.user.id}`, null);
+        if (!data) {
+          return interaction.update({
+            embeds: [errEmbed("Kayıt formu bulunamadı. Lütfen tekrar form doldur.")],
+            components: []
+          });
+        }
+
+        const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+        if (!member) return;
+
+        try {
+          const nick = await applyRegistration(
+            interaction.guild,
+            member,
+            data,
+            interaction.customId === "register_male" ? "male" : "female",
+            null
+          );
+
+          await interaction.update({
+            embeds: [
+              jarmEmbed(CONFIG.colors.success)
+                .setTitle("🎉 Kayıt Başarılı")
+                .setDescription(`Hoş geldin **${nick}**! Rolün verildi.`)
+            ],
+            components: []
+          });
+        } catch (err) {
+          await interaction.update({
+            embeds: [errEmbed(err.message)],
+            components: []
+          });
+        }
+        return;
+      }
+    }
+  } catch (err) {
+    console.error("[INTERACTION ERROR]", err);
+
+    const payload = {
+      embeds: [errEmbed("Beklenmeyen bir hata oluştu. Hata loglandı.")],
+      flags: MessageFlags.Ephemeral
+    };
+
+    if (interaction.replied || interaction.deferred) {
+      await interaction.followUp(payload).catch(() => {});
+    } else {
+      await interaction.reply(payload).catch(() => {});
+    }
+  }
 });
 
-/* ============================ GUARD EVENTS ============================ */
-client.on('channelDelete', async (ch) => { if (!ch.guild) return; const cfg = guardCfg(ch.guild); if (!cfg.enabled.nuke) return; const logs = await ch.guild.fetchAuditLogs({ type: AuditLogEvent.ChannelDelete, limit: 1 }).catch(() => null); const ex = logs && logs.entries.first(); if (!ex || !ex.executor) return; if (guardAllowed(ch.guild, ex.executor.id)) return; await guardCount(client, ch.guild, ex.executor.id, 'channelDelete'); });
-client.on('channelCreate', async (ch) => { if (!ch.guild) return; const cfg = guardCfg(ch.guild); if (!cfg.enabled.nuke) return; const logs = await ch.guild.fetchAuditLogs({ type: AuditLogEvent.ChannelCreate, limit: 1 }).catch(() => null); const ex = logs && logs.entries.first(); if (!ex || !ex.executor) return; if (guardAllowed(ch.guild, ex.executor.id)) return; await guardCount(client, ch.guild, ex.executor.id, 'channelCreate'); });
-client.on('roleDelete', async (r) => { const cfg = guardCfg(r.guild); if (!cfg.enabled.nuke) return; const logs = await r.guild.fetchAuditLogs({ type: AuditLogEvent.RoleDelete, limit: 1 }).catch(() => null); const ex = logs && logs.entries.first(); if (!ex || !ex.executor) return; if (guardAllowed(r.guild, ex.executor.id)) return; await guardCount(client, r.guild, ex.executor.id, 'roleDelete'); });
-client.on('guildMemberUpdate', async (oldM, newM) => {
-  const cfg = guardCfg(newM.guild); if (!cfg.enabled.role) return;
-  const added = newM.roles.cache.filter(r => !oldM.roles.cache.has(r.id));
-  if (!added.size) return;
-  const logs = await newM.guild.fetchAuditLogs({ type: AuditLogEvent.MemberRoleUpdate, limit: 1 }).catch(() => null);
-  const ex = logs && logs.entries.first();
-  if (!ex || !ex.executor) return;
-  if (guardAllowed(newM.guild, ex.executor.id)) return;
-  await newM.roles.remove(added.map(r => r.id), 'GUARD: yetkisiz rol').catch(() => {});
-  await guardCount(client, newM.guild, ex.executor.id, 'roleUpdate');
+/* ============================================================
+   MESSAGE EVENTS
+============================================================ */
+
+client.on("messageCreate", async message => {
+  try {
+    if (!message.guild || message.author.bot) return;
+
+    const afk = db.get(`afk_${message.guild.id}_${message.author.id}`, null);
+    if (afk) {
+      db.delete(`afk_${message.guild.id}_${message.author.id}`);
+      await message.reply({
+        embeds: [okEmbed(`AFK modundan çıktın. Sebep: \`${cleanText(afk.reason, 150)}\``)]
+      }).catch(() => {});
+    }
+
+    for (const user of message.mentions.users.values()) {
+      const userAfk = db.get(`afk_${message.guild.id}_${user.id}`, null);
+      if (userAfk) {
+        await message.reply({
+          embeds: [infoEmbed(`🛌 ${user} şu an AFK: \`${cleanText(userAfk.reason, 150)}\` • <t:${Math.floor(userAfk.since / 1000)}:R>`)]
+        }).catch(() => {});
+      }
+    }
+
+    const automodBlocked = await runAutomod(message);
+    if (automodBlocked) return;
+
+    const aiChannels = db.get(`ai_channels_${message.guild.id}`, []);
+    const mentionedBot = message.mentions.users.has(client.user.id);
+    const inAiChannel = aiChannels.includes(message.channel.id);
+
+    if (mentionedBot || inAiChannel) {
+      const question = message.content
+        .replace(new RegExp(`<@!?${client.user.id}>`, "g"), "")
+        .trim();
+
+      if (question) {
+        await answerAiMessage(message, question);
+        return;
+      }
+    }
+
+    await giveXp(message);
+  } catch (err) {
+    console.error("[MESSAGE ERROR]", err);
+  }
 });
 
-/* ============================ REMINDERS ============================ */
+client.on("messageDelete", message => {
+  if (!message.guild || message.author?.bot) return;
+  snipes.set(message.channel.id, {
+    author: message.author.tag,
+    content: message.content || "",
+    time: Date.now()
+  });
+});
+
+/* ============================================================
+   MEMBER EVENTS
+============================================================ */
+
+client.on("guildMemberAdd", async member => {
+  try {
+    const guild = member.guild;
+
+    const roleCfg = db.get(`otorole_${guild.id}`, null);
+    if (roleCfg) {
+      const roleId = member.user.bot ? roleCfg.bot : roleCfg.member;
+      if (roleId && guild.roles.cache.has(roleId)) {
+        await member.roles.add(roleId, "Jarm otorol").catch(() => {});
+      }
+    }
+
+    const guard = getGuard(guild.id);
+    if (guard.enabled && guard.antiRaid) {
+      const joins = (joinTracker.get(guild.id) || []).filter(t => Date.now() - t < 10000);
+      joins.push(Date.now());
+      joinTracker.set(guild.id, joins);
+
+      if (joins.length >= 8) {
+        await guardLog(
+          guild,
+          jarmEmbed(CONFIG.colors.guard)
+            .setTitle("🚨 Raid Şüphesi")
+            .setDescription(`10 saniye içinde **${joins.length}** giriş algılandı. Yeni gelen üyeye timeout deneniyor.`)
+        );
+        await member.timeout(10 * 60_000, "Jarm anti-raid").catch(() => {});
+      }
+    }
+
+    const counter = db.get(`counter_${guild.id}`, null);
+    if (counter && guild.channels.cache.has(counter.channel)) {
+      await guild.channels.cache.get(counter.channel).send({
+        embeds: [
+          baseEmbed(CONFIG.colors.success)
+            .setDescription(`🎉 **${member.user.tag}** sunucuya katıldı. Üye: **${guild.memberCount}/${counter.target}**`)
+        ]
+      }).catch(() => {});
+    }
+
+    const welcomeId = db.get(`welcome_${guild.id}`, null);
+    if (welcomeId && guild.channels.cache.has(welcomeId)) {
+      await guild.channels.cache.get(welcomeId).send({
+        embeds: [
+          jarmEmbed(CONFIG.colors.success)
+            .setTitle("👋 Hoş Geldin")
+            .setDescription(`${member} sunucuya katıldı!\n\nHesap oluşturma: <t:${Math.floor(member.user.createdTimestamp / 1000)}:R>\nÜye sayısı: **${guild.memberCount}**`)
+            .setThumbnail(member.user.displayAvatarURL({ size: 512 }))
+        ],
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("register_start")
+              .setLabel("Kayıt Ol")
+              .setEmoji("📝")
+              .setStyle(ButtonStyle.Success)
+          )
+        ]
+      }).catch(() => {});
+    }
+
+    const logId = db.get(`welcomelog_${guild.id}`, null);
+    if (logId && guild.channels.cache.has(logId)) {
+      await guild.channels.cache.get(logId).send({
+        embeds: [
+          baseEmbed(CONFIG.colors.green)
+            .setTitle("➡️ Üye Girişi")
+            .setDescription(`${member} giriş yaptı.`)
+            .addFields(
+              { name: "ID", value: `\`${member.id}\``, inline: true },
+              { name: "Hesap", value: `<t:${Math.floor(member.user.createdTimestamp / 1000)}:R>`, inline: true },
+              { name: "Üye Sayısı", value: String(guild.memberCount), inline: true }
+            )
+        ]
+      }).catch(() => {});
+    }
+  } catch (err) {
+    console.error("[GUILD MEMBER ADD ERROR]", err);
+  }
+});
+
+client.on("guildMemberRemove", async member => {
+  try {
+    const guild = member.guild;
+
+    db.delete(`register_pending_${guild.id}_${member.id}`);
+    db.delete(`open_ticket_${guild.id}_${member.id}`);
+
+    const logId = db.get(`welcomelog_${guild.id}`, null);
+    if (logId && guild.channels.cache.has(logId)) {
+      await guild.channels.cache.get(logId).send({
+        embeds: [
+          baseEmbed(CONFIG.colors.error)
+            .setTitle("⬅️ Üye Çıkışı")
+            .setDescription(`**${member.user.tag}** sunucudan ayrıldı.`)
+            .addFields(
+              { name: "ID", value: `\`${member.id}\``, inline: true },
+              { name: "Kalan Üye", value: String(guild.memberCount), inline: true }
+            )
+        ]
+      }).catch(() => {});
+    }
+  } catch (err) {
+    console.error("[GUILD MEMBER REMOVE ERROR]", err);
+  }
+});
+
+/* ============================================================
+   GUARD EVENTS
+============================================================ */
+
+client.on("channelDelete", async channel => {
+  try {
+    if (!channel.guild) return;
+    const cfg = getGuard(channel.guild.id);
+    if (!cfg.enabled || !cfg.antiNuke) return;
+
+    const logs = await channel.guild.fetchAuditLogs({
+      type: AuditLogEvent.ChannelDelete,
+      limit: 1
+    }).catch(() => null);
+
+    const entry = logs?.entries?.first();
+    if (!entry?.executor) return;
+
+    await registerGuardAction(channel.guild, entry.executor.id, "channelDelete");
+  } catch (err) {
+    console.error("[GUARD channelDelete]", err);
+  }
+});
+
+client.on("channelCreate", async channel => {
+  try {
+    if (!channel.guild) return;
+    const cfg = getGuard(channel.guild.id);
+    if (!cfg.enabled || !cfg.antiNuke) return;
+
+    const logs = await channel.guild.fetchAuditLogs({
+      type: AuditLogEvent.ChannelCreate,
+      limit: 1
+    }).catch(() => null);
+
+    const entry = logs?.entries?.first();
+    if (!entry?.executor) return;
+
+    await registerGuardAction(channel.guild, entry.executor.id, "channelCreate");
+  } catch (err) {
+    console.error("[GUARD channelCreate]", err);
+  }
+});
+
+client.on("roleDelete", async role => {
+  try {
+    const cfg = getGuard(role.guild.id);
+    if (!cfg.enabled || !cfg.antiNuke) return;
+
+    const logs = await role.guild.fetchAuditLogs({
+      type: AuditLogEvent.RoleDelete,
+      limit: 1
+    }).catch(() => null);
+
+    const entry = logs?.entries?.first();
+    if (!entry?.executor) return;
+
+    await registerGuardAction(role.guild, entry.executor.id, "roleDelete");
+  } catch (err) {
+    console.error("[GUARD roleDelete]", err);
+  }
+});
+
+client.on("guildMemberUpdate", async (oldMember, newMember) => {
+  try {
+    const cfg = getGuard(newMember.guild.id);
+    if (!cfg.enabled || !cfg.antiRole) return;
+
+    const addedRoles = newMember.roles.cache.filter(r => !oldMember.roles.cache.has(r.id));
+    if (!addedRoles.size) return;
+
+    const logs = await newMember.guild.fetchAuditLogs({
+      type: AuditLogEvent.MemberRoleUpdate,
+      limit: 1
+    }).catch(() => null);
+
+    const entry = logs?.entries?.first();
+    if (!entry?.executor) return;
+
+    if (isGuardWhitelisted(newMember.guild, entry.executor.id)) return;
+
+    await newMember.roles.remove(addedRoles.map(r => r.id), "Jarm Guard: yetkisiz rol ekleme").catch(() => {});
+    await registerGuardAction(newMember.guild, entry.executor.id, "unauthorizedRoleAdd");
+  } catch (err) {
+    console.error("[GUARD memberUpdate]", err);
+  }
+});
+
+/* ============================================================
+   REMINDERS
+============================================================ */
+
 setInterval(async () => {
-  const list = db.get('reminders', null) || [];
-  if (!list.length) return;
-  const due = list.filter(r => r.t <= Date.now());
-  if (!due.length) return;
-  db.set('reminders', list.filter(r => r.t > Date.now()));
-  for (const r of due) { const u = await client.users.fetch(r.u).catch(() => null); if (u) u.send({ embeds: [base(config.colors.warn).setTitle('⏰ HATIRLATMA').setDescription(r.m)] }).catch(() => {}); }
-}, 20000);
+  try {
+    const reminders = db.get("reminders", []);
+    if (!Array.isArray(reminders) || !reminders.length) return;
 
-/* ============================ EXPRESS (RENDER 7/24) ============================ */
+    const due = reminders.filter(r => r.time <= Date.now());
+    if (!due.length) return;
+
+    db.set("reminders", reminders.filter(r => r.time > Date.now()));
+
+    for (const item of due) {
+      const user = await client.users.fetch(item.userId).catch(() => null);
+      if (!user) continue;
+
+      await user.send({
+        embeds: [
+          jarmEmbed(CONFIG.colors.warning)
+            .setTitle("⏰ Hatırlatma")
+            .setDescription(cleanText(item.text, 1000))
+        ]
+      }).catch(() => {});
+    }
+  } catch (err) {
+    console.error("[REMINDER ERROR]", err);
+  }
+}, 20_000);
+
+/* ============================================================
+   READY / DEPLOY COMMANDS
+============================================================ */
+
+client.once("ready", async () => {
+  console.log(`[BOT] ${client.user.tag} aktif.`);
+
+  client.user.setPresence({
+    status: "online",
+    activities: [
+      {
+        name: "Jarm • /yardim",
+        type: ActivityType.Watching
+      }
+    ]
+  });
+
+  const body = client.commands.map(cmd => cmd.data.toJSON());
+  const rest = new REST({ version: "10" }).setToken(CONFIG.token);
+
+  try {
+    if (CONFIG.devGuildId) {
+      await rest.put(
+        Routes.applicationGuildCommands(CONFIG.clientId, CONFIG.devGuildId),
+        { body }
+      );
+      console.log(`[COMMANDS] ${body.length} komut test sunucusuna yüklendi.`);
+    } else {
+      await rest.put(
+        Routes.applicationCommands(CONFIG.clientId),
+        { body }
+      );
+      console.log(`[COMMANDS] ${body.length} komut globale yüklendi.`);
+    }
+  } catch (err) {
+    console.error("[COMMAND DEPLOY ERROR]", err);
+  }
+});
+
+/* ============================================================
+   EXPRESS SERVER
+============================================================ */
+
 const app = express();
-app.get('/', (req, res) => res.status(200).json({ status: 'online', bot: client.user ? client.user.tag : 'boot', uptime: process.uptime(), ping: client.ws.ping, servers: client.guilds.cache.size }));
-app.get('/health', (req, res) => res.json({ ok: true }));
-app.listen(config.port, () => console.log(`[WEB] :${config.port} dinleniyor.`));
 
-/* ============================ ERROR HANDLING ============================ */
-process.on('unhandledRejection', e => console.error('[UR]', e && e.stack ? e.stack : e));
-process.on('uncaughtException', e => console.error('[UE]', e && e.stack ? e.stack : e));
-process.on('warning', w => console.warn('[W]', w.message));
+app.get("/", (req, res) => {
+  res.json({
+    status: "online",
+    bot: client.user ? client.user.tag : "starting",
+    uptime: process.uptime(),
+    guilds: client.guilds.cache.size,
+    ping: client.ws.ping
+  });
+});
 
-client.login(config.token).catch(e => { console.error('[LOGIN]', e.message); process.exit(1); });
+app.get("/health", (req, res) => {
+  res.json({ ok: true });
+});
+
+app.listen(CONFIG.port, () => {
+  console.log(`[WEB] Express server ${CONFIG.port} portunda çalışıyor.`);
+});
+
+/* ============================================================
+   GLOBAL ERROR HANDLING
+============================================================ */
+
+process.on("unhandledRejection", err => {
+  console.error("[UNHANDLED REJECTION]", err);
+});
+
+process.on("uncaughtException", err => {
+  console.error("[UNCAUGHT EXCEPTION]", err);
+});
+
+process.on("warning", warning => {
+  console.warn("[PROCESS WARNING]", warning.message);
+});
+
+/* ============================================================
+   LOGIN
+============================================================ */
+
+client.login(CONFIG.token).catch(err => {
+  console.error("[LOGIN ERROR]", err);
+  process.exit(1);
+});
