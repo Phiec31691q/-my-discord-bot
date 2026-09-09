@@ -1074,7 +1074,6 @@ process.on('warning', (w) => console.warn('[WARNING]', w.message));
 /* ============================ LOGIN ============================ */
 client.login(config.token).catch((e) => { console.error('[LOGIN] Hata:', e.message); process.exit(1); });
 // Express Web Server (Render Port İhtiyacı İçin)
-const express = require('express');
 const app = express();
 const port = process.env.PORT || 8080;
 
