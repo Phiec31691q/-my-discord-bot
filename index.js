@@ -24,7 +24,17 @@ const {
   MessageFlags
 } = require("discord.js");
 
-const { joinVoiceChannel, VoiceConnectionStatus, entersState } = require("@discordjs/voice");
+/* SES KÜTÜPHANESİ — SİGORTALI YÜKLEME (paket yoksa bot çökmez) */
+let voiceLib = null;
+try {
+  voiceLib = require("@discordjs/voice");
+} catch {
+  voiceLib = null;
+  console.warn("[VOICE] @discordjs/voice kurulu değil, ses özelliği kapalı.");
+}
+const joinVoiceChannel = voiceLib ? voiceLib.joinVoiceChannel : null;
+const VoiceConnectionStatus = voiceLib ? voiceLib.VoiceConnectionStatus : null;
+const entersState = voiceLib ? voiceLib.entersState : null;
 
 const express = require("express");
 const fs = require("fs");
@@ -238,7 +248,9 @@ function scheduleVoiceRetry(ms = 5000) {
 }
 
 function connectVoice() {
+  if (!joinVoiceChannel) return;
   if (!voice.channelId) return;
+
   const guild = client.guilds.cache.get(voice.guildId);
   if (!guild) return;
 
@@ -275,6 +287,11 @@ function connectVoice() {
 }
 
 async function setupVoice() {
+  if (!joinVoiceChannel) {
+    console.warn("[VOICE] Ses kütüphanesi yok, 7/24 ses kanalı atlanıyor.");
+    return;
+  }
+
   const guild = process.env.VOICE_GUILD_ID
     ? client.guilds.cache.get(process.env.VOICE_GUILD_ID)
     : client.guilds.cache.first();
@@ -601,7 +618,7 @@ async function giveXp(message) {
   }
 }
 
-/* ================= BOM / OWO ECONOMY ================= */
+/* ================= BOM / OWO ================= */
 
 function getBom(guildId, userId) {
   return db.get(`bom_${guildId}_${userId}`, { balance: 0, lastDaily: 0, gambles: 0, wins: 0 });
@@ -628,9 +645,7 @@ const OWO_PHRASES = {
     "{user} {target} kişisine minik bir busu kondurdu! 💋 UwU",
     "{user}, {target} kişisini alnından öptü, çok saf! 💞"
   ],
-  face: [
-    "OwO", "UwU", ">w<", "O.O", "-w-", "ÒwÓ", "◕w◕", "≧w"
-  ]
+  face: ["OwO", "UwU", ">w<", "O.O", "-w-", "ÒwÓ", "◕w◕", "w≦"]
 };
 
 /* ================= TICKET SYSTEM ================= */
@@ -812,7 +827,6 @@ async function createTicket(interaction) {
     db.set(`ticket_${channel.id}`, meta);
     db.set(`open_ticket_${guild.id}_${userId}`, channel.id);
 
-    /* Çift ticket öz temizliği: aynı sahibe ait fazlalıkları sil */
     const sameOwner = guild.channels.cache.filter(
       c => c.type === ChannelType.GuildText && (c.topic || "").includes(`Owner: ${userId}`)
     );
@@ -924,7 +938,7 @@ async function sendTicketTranscript(interaction) {
   await interaction.editReply({ embeds: [okEmbed("Transkript gönderildi.")] });
 }
 
-/* Çift ticket süpürgesi: 30 sn'de bir tüm sunucuları tara */
+/* Çift ticket süpürgesi */
 setInterval(async () => {
   try {
     for (const guild of client.guilds.cache.values()) {
@@ -2083,11 +2097,9 @@ commands.push({
   }
 });
 
-/* ================= BOM / OWO COMMANDS ================= */
-
 commands.push({
   category: "Bom & Owo",
-  data: new SlashCommandBuilder().setName("bom").setDescription("Bom bakiyeni gösterir.").addUserOption(o => o.setName("kullanici").setDescription("Kullanıcı")),
+  data: new SlashCommandBuilder().setName("bom").setDescription("Bom bakiye.").addUserOption(o => o.setName("kullanici").setDescription("Kullanıcı")),
   async execute(interaction) {
     const user = interaction.options.getUser("kullanici") || interaction.user;
     const data = getBom(interaction.guild.id, user.id);
@@ -2107,14 +2119,14 @@ commands.push({
 
 commands.push({
   category: "Bom & Owo",
-  data: new SlashCommandBuilder().setName("bom-daily").setDescription("Günlük Bom ödülü al."),
+  data: new SlashCommandBuilder().setName("bom-daily").setDescription("Günlük Bom ödülü."),
   async execute(interaction) {
     const data = getBom(interaction.guild.id, interaction.user.id);
     const now = Date.now();
 
     if (now - data.lastDaily < 24 * 60 * 60 * 1000) {
       const remain = Math.ceil((24 * 60 * 60 * 1000 - (now - data.lastDaily)) / 3600000);
-      return interaction.reply({ embeds: [errEmbed(`Günlük ödülünü zaten aldın. ~${remain} saat sonra gel.`)] });
+      return interaction.reply({ embeds: [errEmbed(`Günlük ödül alındı. ~${remain} saat sonra gel.`)] });
     }
 
     const amount = 250 + randomInt(0, 100);
@@ -2130,15 +2142,13 @@ commands.push({
   category: "Bom & Owo",
   data: new SlashCommandBuilder()
     .setName("bom-gamble")
-    .setDescription("Bom ile bahis oyna (yazı-tura).")
+    .setDescription("Bom bahis.")
     .addIntegerOption(o => o.setName("miktar").setDescription("Miktar").setRequired(true).setMinValue(1)),
   async execute(interaction) {
     const amount = interaction.options.getInteger("miktar");
     const data = getBom(interaction.guild.id, interaction.user.id);
 
-    if (data.balance < amount) {
-      return interaction.reply({ embeds: [errEmbed(`Yetersiz bakiye. Bakiyen: ${data.balance} Bom`)] });
-    }
+    if (data.balance < amount) return interaction.reply({ embeds: [errEmbed(`Yetersiz bakiye: ${data.balance} Bom`)] });
 
     data.gambles += 1;
     const win = Math.random() < 0.5;
@@ -2156,7 +2166,7 @@ commands.push({
       embeds: [
         jarmEmbed(win ? CONFIG.colors.success : CONFIG.colors.error)
           .setTitle(win ? "🎉 KAZANDIN!" : "💀 KAYBETTİN")
-          .setDescription(win ? `+${amount} Bom kazandın! Bakiye: **${data.balance}**` : `-${amount} Bom kaybettin. Bakiye: **${data.balance}**`)
+          .setDescription(win ? `+${amount} Bom. Bakiye: **${data.balance}**` : `-${amount} Bom. Bakiye: **${data.balance}**`)
       ]
     });
   }
@@ -2166,7 +2176,7 @@ commands.push({
   category: "Bom & Owo",
   data: new SlashCommandBuilder()
     .setName("bom-transfer")
-    .setDescription("Bom transfer et.")
+    .setDescription("Bom transfer.")
     .addUserOption(o => o.setName("kullanici").setDescription("Kullanıcı").setRequired(true))
     .addIntegerOption(o => o.setName("miktar").setDescription("Miktar").setRequired(true).setMinValue(1)),
   async execute(interaction) {
@@ -2193,14 +2203,14 @@ commands.push({
 
 commands.push({
   category: "Bom & Owo",
-  data: new SlashCommandBuilder().setName("bom-top").setDescription("Bom zenginler listesi."),
+  data: new SlashCommandBuilder().setName("bom-top").setDescription("Bom liderliği."),
   async execute(interaction) {
     const rows = db.startsWith(`bom_${interaction.guild.id}_`)
       .map(([key, value]) => Object.assign({ userId: key.split("_")[2] }, value))
       .sort((a, b) => b.balance - a.balance)
       .slice(0, 10);
 
-    if (!rows.length) return interaction.reply({ embeds: [infoEmbed("Henüz Bom verisi yok.")] });
+    if (!rows.length) return interaction.reply({ embeds: [infoEmbed("Bom verisi yok.")] });
 
     await interaction.reply({
       embeds: [
@@ -2227,25 +2237,21 @@ commands.push({
     .addUserOption(o => o.setName("kullanici").setDescription("Hedef")),
   async execute(interaction) {
     const action = interaction.options.getString("aksiyon");
-    const target = interaction.options.getUser("kullanici");
 
     if (action === "face") {
       return interaction.reply({ embeds: [jarmEmbed(CONFIG.colors.pink).setTitle("😺 Owo").setDescription(`**${pick(OWO_PHRASES.face)}**`)] });
     }
 
-    if (!target) return deny(interaction, "Bu aksiyon için hedef kullanıcı seç.");
+    const target = interaction.options.getUser("kullanici");
+    if (!target) return deny(interaction, "Hedef kullanıcı seç.");
 
     const phrase = pick(OWO_PHRASES[action])
       .replace("{user}", `${interaction.user}`)
       .replace("{target}", `${target}`);
 
-    await interaction.reply({
-      embeds: [jarmEmbed(CONFIG.colors.pink).setDescription(phrase)]
-    });
+    await interaction.reply({ embeds: [jarmEmbed(CONFIG.colors.pink).setDescription(phrase)] });
   }
 });
-
-/* ================= GENERAL / FUN / TOOLS ================= */
 
 commands.push({
   category: "Genel",
@@ -2690,7 +2696,7 @@ client.on("interactionCreate", async interaction => {
   }
 });
 
-/* ================= MESSAGE / MEMBER / GUARD EVENTS ================= */
+/* ================= EVENTS ================= */
 
 client.on("messageCreate", async message => {
   try {
@@ -2955,4 +2961,4 @@ process.on("warning", w => console.warn("[WARNING]", w.message));
 client.login(CONFIG.token).catch(err => {
   console.error("[LOGIN ERROR]", err);
   process.exit(1);
-});
+});=
